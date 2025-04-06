@@ -1,8 +1,8 @@
 Note ID,Content,Related Step ID
 Note1,We validate email format using standard RFC 5322 regex pattern,1
 Note2,We check both exact matches and fuzzy matches for company names,2
-Note3,Target market criteria: Revenue > $1M, Employee Count > 50, Industry in target list,3
-Note4,Lead statuses: New, Contacted, Qualified, Unqualified, Lost,4
+Note3,Target market criteria: Revenue > $1; Employee Count > 50; Industry in target list,3
+Note4,Lead statuses: New; Contacted; Qualified; Unqualified; Lost,4
 Note5,Sales queue capacity: Max 100 leads per rep,5
 Note6,Status updates are logged in audit trail,6
 Note7,Account qualification based on BANT criteria,7 
