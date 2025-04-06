@@ -6,6 +6,7 @@ import sys
 import time
 import random
 import os
+import csv
 from pathlib import Path
 from typing import Optional, List
 
@@ -159,306 +160,373 @@ def show_startup_animation(in_menu: bool = False) -> None:
 
 def run_interview(builder: ProcessBuilder) -> None:
     """Run the interactive interview process."""
-    print(f"\n=== Process Builder: {builder.process_name} ===\n")
-    
-    while True:
-        # Get step title with AI suggestion
-        if builder.openai_client:
-            try:
-                show_loading_animation("Generating step title", in_menu=True)
-                if not builder.steps:  # First step
-                    suggested_title = builder.suggested_first_step
-                    if suggested_title:
+    try:
+        clear_screen()
+        print(f"\n=== Process Builder: {builder.process_name} - Add Step ===\n")
+        
+        while True:  # Main loop for adding steps
+            # Get step title with AI suggestion
+            if builder.openai_client:
+                try:
+                    if not builder.steps:  # First step
+                        suggested_title = builder.suggested_first_step
                         print(f"AI suggests starting with: '{suggested_title}'")
                         use_suggested = input("Would you like to use this title? (y/n)\n> ").lower()
                         if use_suggested == 'y':
                             step_id = suggested_title
                         else:
-                            step_id = get_step_input("What is the title of this step?\n> ")
+                            step_id = get_step_input("What is the title of this step?")
                     else:
-                        step_id = get_step_input("What is the title of this step?\n> ")
-                else:
+                        step_id = get_step_input("What is the title of this step?")
+                        want_suggestion = input("Would you like an AI suggestion for the step title? (y/n)\n> ").lower()
+                        if want_suggestion == 'y':
+                            show_loading_animation("Generating step title", in_menu=True)
+                            suggested_title = builder.generate_next_step_title()
+                            if suggested_title:
+                                print(f"AI suggests the following title: '{suggested_title}'")
+                                use_suggested = input("Would you like to use this title? (y/n)\n> ").lower()
+                                if use_suggested == 'y':
+                                    step_id = suggested_title
+                                else:
+                                    step_id = get_step_input("What is the title of this step?")
+                            else:
+                                step_id = get_step_input("What is the title of this step?")
+                        else:
+                            step_id = get_step_input("What is the title of this step?")
+                except Exception as e:
+                    print(f"Error generating step title suggestion: {str(e)}")
                     step_id = get_step_input("What is the title of this step?\n> ")
-            except Exception as e:
-                print(f"Error generating step title suggestion: {str(e)}")
+            else:
                 step_id = get_step_input("What is the title of this step?\n> ")
-        else:
-            step_id = get_step_input("What is the title of this step?\n> ")
-        
-        # Get step description with AI suggestion
-        if builder.openai_client:
-            try:
-                show_loading_animation("Generating step description", in_menu=True)
-                suggested_description = builder.generate_step_description(step_id)
-                if suggested_description:
-                    print(f"AI suggests the following description: '{suggested_description}'")
-                    use_suggested = input("Would you like to use this description? (y/n)\n> ").lower()
-                    if use_suggested == 'y':
-                        description = suggested_description
+            
+            # Get step description with optional AI suggestion
+            if builder.openai_client:
+                try:
+                    want_suggestion = input("Would you like an AI suggestion for the step description? (y/n)\n> ").lower()
+                    if want_suggestion == 'y':
+                        show_loading_animation("Generating step description", in_menu=True)
+                        suggested_description = builder.generate_step_description(step_id)
+                        if suggested_description:
+                            print(f"AI suggests the following description: '{suggested_description}'")
+                            use_suggested = input("Would you like to use this description? (y/n)\n> ").lower()
+                            if use_suggested == 'y':
+                                description = suggested_description
+                            else:
+                                description = get_step_input("What happens in this step?")
+                        else:
+                            description = get_step_input("What happens in this step?")
                     else:
-                        description = get_step_input("What happens in this step?\n> ")
-                else:
-                    description = get_step_input("What happens in this step?\n> ")
-            except Exception as e:
-                print(f"Error generating description suggestion: {str(e)}")
-                description = get_step_input("What happens in this step?\n> ")
-        else:
-            description = get_step_input("What happens in this step?\n> ")
-        
-        # Get decision with AI suggestion
-        if builder.openai_client:
-            try:
-                show_loading_animation("Generating decision suggestion", in_menu=True)
-                suggested_decision = builder.generate_step_decision(step_id, description)
-                if suggested_decision:
-                    print(f"AI suggests the following decision: '{suggested_decision}'")
-                    use_suggested = input("Would you like to use this decision? (y/n)\n> ").lower()
-                    if use_suggested == 'y':
-                        decision = suggested_decision
+                        description = get_step_input("What happens in this step?")
+                except Exception as e:
+                    print(f"Error generating description suggestion: {str(e)}")
+                    description = get_step_input("What happens in this step?")
+            else:
+                description = get_step_input("What happens in this step?")
+            
+            # Get decision with optional AI suggestion
+            if builder.openai_client:
+                try:
+                    want_suggestion = input("Would you like an AI suggestion for the decision? (y/n)\n> ").lower()
+                    if want_suggestion == 'y':
+                        show_loading_animation("Generating decision suggestion", in_menu=True)
+                        suggested_decision = builder.generate_step_decision(step_id, description)
+                        if suggested_decision:
+                            print(f"AI suggests the following decision: '{suggested_decision}'")
+                            use_suggested = input("Would you like to use this decision? (y/n)\n> ").lower()
+                            if use_suggested == 'y':
+                                decision = suggested_decision
+                            else:
+                                decision = get_step_input("What decision needs to be made?")
+                        else:
+                            decision = get_step_input("What decision needs to be made?")
                     else:
-                        decision = get_step_input("What decision needs to be made?\n> ")
-                else:
-                    decision = get_step_input("What decision needs to be made?\n> ")
-            except Exception as e:
-                print(f"Error generating decision suggestion: {str(e)}")
-                decision = get_step_input("What decision needs to be made?\n> ")
-        else:
-            decision = get_step_input("What decision needs to be made?\n> ")
-        
-        # Get success outcome with AI suggestion
-        if builder.openai_client:
-            try:
-                show_loading_animation("Generating success outcome suggestion", in_menu=True)
-                suggested_success = builder.generate_step_success_outcome(step_id, description, decision)
-                if suggested_success:
-                    print(f"AI suggests the following success outcome: '{suggested_success}'")
-                    use_suggested = input("Would you like to use this success outcome? (y/n)\n> ").lower()
-                    if use_suggested == 'y':
-                        success_outcome = suggested_success
+                        decision = get_step_input("What decision needs to be made?")
+                except Exception as e:
+                    print(f"Error generating decision suggestion: {str(e)}")
+                    decision = get_step_input("What decision needs to be made?")
+            else:
+                decision = get_step_input("What decision needs to be made?")
+            
+            # Get success outcome with optional AI suggestion
+            if builder.openai_client:
+                try:
+                    want_suggestion = input("Would you like an AI suggestion for the success outcome? (y/n)\n> ").lower()
+                    if want_suggestion == 'y':
+                        show_loading_animation("Generating success outcome suggestion", in_menu=True)
+                        suggested_success = builder.generate_step_success_outcome(step_id, description, decision)
+                        if suggested_success:
+                            print(f"AI suggests the following success outcome: '{suggested_success}'")
+                            use_suggested = input("Would you like to use this success outcome? (y/n)\n> ").lower()
+                            if use_suggested == 'y':
+                                success_outcome = suggested_success
+                            else:
+                                success_outcome = get_step_input("What happens if this step succeeds?")
+                        else:
+                            success_outcome = get_step_input("What happens if this step succeeds?")
                     else:
-                        success_outcome = get_step_input("What happens if this step succeeds?\n> ")
-                else:
-                    success_outcome = get_step_input("What happens if this step succeeds?\n> ")
-            except Exception as e:
-                print(f"Error generating success outcome suggestion: {str(e)}")
-                success_outcome = get_step_input("What happens if this step succeeds?\n> ")
-        else:
-            success_outcome = get_step_input("What happens if this step succeeds?\n> ")
-        
-        # Get failure outcome with AI suggestion
-        if builder.openai_client:
-            try:
-                show_loading_animation("Generating failure outcome suggestion", in_menu=True)
-                suggested_failure = builder.generate_step_failure_outcome(step_id, description, decision)
-                if suggested_failure:
-                    print(f"AI suggests the following failure outcome: '{suggested_failure}'")
-                    use_suggested = input("Would you like to use this failure outcome? (y/n)\n> ").lower()
-                    if use_suggested == 'y':
-                        failure_outcome = suggested_failure
+                        success_outcome = get_step_input("What happens if this step succeeds?")
+                except Exception as e:
+                    print(f"Error generating success outcome suggestion: {str(e)}")
+                    success_outcome = get_step_input("What happens if this step succeeds?")
+            else:
+                success_outcome = get_step_input("What happens if this step succeeds?")
+            
+            # Get failure outcome with optional AI suggestion
+            if builder.openai_client:
+                try:
+                    want_suggestion = input("Would you like an AI suggestion for the failure outcome? (y/n)\n> ").lower()
+                    if want_suggestion == 'y':
+                        show_loading_animation("Generating failure outcome suggestion", in_menu=True)
+                        suggested_failure = builder.generate_step_failure_outcome(step_id, description, decision)
+                        if suggested_failure:
+                            print(f"AI suggests the following failure outcome: '{suggested_failure}'")
+                            use_suggested = input("Would you like to use this failure outcome? (y/n)\n> ").lower()
+                            if use_suggested == 'y':
+                                failure_outcome = suggested_failure
+                            else:
+                                failure_outcome = get_step_input("What happens if this step fails?")
+                        else:
+                            failure_outcome = get_step_input("What happens if this step fails?")
                     else:
-                        failure_outcome = get_step_input("What happens if this step fails?\n> ")
-                else:
-                    failure_outcome = get_step_input("What happens if this step fails?\n> ")
-            except Exception as e:
-                print(f"Error generating failure outcome suggestion: {str(e)}")
-                failure_outcome = get_step_input("What happens if this step fails?\n> ")
-        else:
-            failure_outcome = get_step_input("What happens if this step fails?\n> ")
-        
-        # Get next steps with AI suggestions
-        if builder.openai_client:
-            try:
-                # Get success path suggestion
-                show_loading_animation("Generating next step suggestion", in_menu=True)
-                suggested_next_success = builder.generate_next_step_suggestion(
-                    step_id, description, decision, success_outcome, failure_outcome, True
-                )
-                if suggested_next_success:
-                    print(f"AI suggests the following next step for success: '{suggested_next_success}'")
-                    use_suggested = input("Would you like to use this next step? (y/n)\n> ").lower()
-                    if use_suggested == 'y':
-                        next_step_success = suggested_next_success
+                        failure_outcome = get_step_input("What happens if this step fails?")
+                except Exception as e:
+                    print(f"Error generating failure outcome suggestion: {str(e)}")
+                    failure_outcome = get_step_input("What happens if this step fails?")
+            else:
+                failure_outcome = get_step_input("What happens if this step fails?")
+            
+            # Get next steps with optional AI suggestions
+            if builder.openai_client:
+                try:
+                    # Get success path suggestion with user opt-in
+                    want_suggestion = input("Would you like an AI suggestion for the next step on success? (y/n)\n> ").lower()
+                    if want_suggestion == 'y':
+                        show_loading_animation("Generating next step suggestion", in_menu=True)
+                        suggested_next_success = builder.generate_next_step_suggestion(
+                            step_id, description, decision, success_outcome, failure_outcome, True
+                        )
+                        if suggested_next_success:
+                            print(f"AI suggests the following next step for success: '{suggested_next_success}'")
+                            use_suggested = input("Would you like to use this next step? (y/n)\n> ").lower()
+                            if use_suggested == 'y':
+                                next_step_success = suggested_next_success
+                            else:
+                                while True:
+                                    next_step_success = get_step_input("What's the next step if successful? (Enter 'End' if final step)")
+                                    if builder.validate_next_step(next_step_success):
+                                        break
+                                    print("Please enter a valid step name or 'End' to finish the process.")
+                        else:
+                            while True:
+                                next_step_success = get_step_input("What's the next step if successful? (Enter 'End' if final step)")
+                                if builder.validate_next_step(next_step_success):
+                                    break
+                                print("Please enter a valid step name or 'End' to finish the process.")
                     else:
                         while True:
-                            next_step_success = get_step_input("What's the next step if successful? (Enter 'End' if final step)\n> ")
+                            next_step_success = get_step_input("What's the next step if successful? (Enter 'End' if final step)")
                             if builder.validate_next_step(next_step_success):
                                 break
                             print("Please enter a valid step name or 'End' to finish the process.")
-                else:
-                    while True:
-                        next_step_success = get_step_input("What's the next step if successful? (Enter 'End' if final step)\n> ")
-                        if builder.validate_next_step(next_step_success):
-                            break
-                        print("Please enter a valid step name or 'End' to finish the process.")
-                
-                # Get failure path suggestion
-                show_loading_animation("Generating next step suggestion", in_menu=True)
-                suggested_next_failure = builder.generate_next_step_suggestion(
-                    step_id, description, decision, success_outcome, failure_outcome, False
-                )
-                if suggested_next_failure:
-                    print(f"AI suggests the following next step for failure: '{suggested_next_failure}'")
-                    use_suggested = input("Would you like to use this next step? (y/n)\n> ").lower()
-                    if use_suggested == 'y':
-                        next_step_failure = suggested_next_failure
+                    
+                    # Get failure path suggestion with user opt-in
+                    want_suggestion = input("Would you like an AI suggestion for the next step on failure? (y/n)\n> ").lower()
+                    if want_suggestion == 'y':
+                        show_loading_animation("Generating next step suggestion", in_menu=True)
+                        suggested_next_failure = builder.generate_next_step_suggestion(
+                            step_id, description, decision, success_outcome, failure_outcome, False
+                        )
+                        if suggested_next_failure:
+                            print(f"AI suggests the following next step for failure: '{suggested_next_failure}'")
+                            use_suggested = input("Would you like to use this next step? (y/n)\n> ").lower()
+                            if use_suggested == 'y':
+                                next_step_failure = suggested_next_failure
+                            else:
+                                while True:
+                                    next_step_failure = get_step_input("What's the next step if failed? (Enter 'End' if final step)")
+                                    if builder.validate_next_step(next_step_failure):
+                                        break
+                                    print("Please enter a valid step name or 'End' to finish the process.")
+                        else:
+                            while True:
+                                next_step_failure = get_step_input("What's the next step if failed? (Enter 'End' if final step)")
+                                if builder.validate_next_step(next_step_failure):
+                                    break
+                                print("Please enter a valid step name or 'End' to finish the process.")
                     else:
                         while True:
-                            next_step_failure = get_step_input("What's the next step if failed? (Enter 'End' if final step)\n> ")
+                            next_step_failure = get_step_input("What's the next step if failed? (Enter 'End' if final step)")
                             if builder.validate_next_step(next_step_failure):
                                 break
                             print("Please enter a valid step name or 'End' to finish the process.")
-                else:
+                except Exception as e:
+                    print(f"Error generating next step suggestions: {str(e)}")
+                    # Fall back to manual input for both paths
                     while True:
-                        next_step_failure = get_step_input("What's the next step if failed? (Enter 'End' if final step)\n> ")
+                        next_step_success = get_step_input("What's the next step if successful? (Enter 'End' if final step)")
+                        if builder.validate_next_step(next_step_success):
+                            break
+                        print("Please enter a valid step name or 'End' to finish the process.")
+                    
+                    while True:
+                        next_step_failure = get_step_input("What's the next step if failed? (Enter 'End' if final step)")
                         if builder.validate_next_step(next_step_failure):
                             break
                         print("Please enter a valid step name or 'End' to finish the process.")
-            except Exception as e:
-                print(f"Error generating next step suggestions: {str(e)}")
-                # Fall back to manual input for both paths
+            else:
+                # No AI client available, use manual input
                 while True:
-                    next_step_success = get_step_input("What's the next step if successful? (Enter 'End' if final step)\n> ")
+                    next_step_success = get_step_input("What's the next step if successful? (Enter 'End' if final step)")
                     if builder.validate_next_step(next_step_success):
                         break
                     print("Please enter a valid step name or 'End' to finish the process.")
                 
                 while True:
-                    next_step_failure = get_step_input("What's the next step if failed? (Enter 'End' if final step)\n> ")
+                    next_step_failure = get_step_input("What's the next step if failed? (Enter 'End' if final step)")
                     if builder.validate_next_step(next_step_failure):
                         break
                     print("Please enter a valid step name or 'End' to finish the process.")
-        else:
-            # No AI client available, use manual input
-            while True:
-                next_step_success = get_step_input("What's the next step if successful? (Enter 'End' if final step)\n> ")
-                if builder.validate_next_step(next_step_success):
-                    break
-                print("Please enter a valid step name or 'End' to finish the process.")
             
-            while True:
-                next_step_failure = get_step_input("What's the next step if failed? (Enter 'End' if final step)\n> ")
-                if builder.validate_next_step(next_step_failure):
-                    break
-                print("Please enter a valid step name or 'End' to finish the process.")
-        
-        # Get note with AI suggestion
-        add_note = input("Would you like to add a note for this step? (y/n)\n> ").lower()
-        note_id = None
-        if add_note == 'y':
-            if builder.openai_client:
-                try:
-                    show_loading_animation("Generating note suggestion", in_menu=True)
-                    suggested_note = builder.generate_step_note(
-                        step_id, description, decision, success_outcome, failure_outcome
-                    )
-                    if suggested_note:
-                        print(f"AI suggests the following note: '{suggested_note}'")
-                        use_suggested = input("Would you like to use this note? (y/n)\n> ").lower()
-                        if use_suggested == 'y':
-                            note_content = suggested_note
+            # Get note with optional AI suggestion
+            add_note = input("Would you like to add a note for this step? (y/n)\n> ").lower()
+            note_id = None
+            if add_note == 'y':
+                if builder.openai_client:
+                    try:
+                        want_suggestion = input("Would you like an AI suggestion for the note? (y/n)\n> ").lower()
+                        if want_suggestion == 'y':
+                            show_loading_animation("Generating note suggestion", in_menu=True)
+                            suggested_note = builder.generate_step_note(
+                                step_id, description, decision, success_outcome, failure_outcome
+                            )
+                            if suggested_note:
+                                print(f"AI suggests the following note: '{suggested_note}'")
+                                use_suggested = input("Would you like to use this note? (y/n)\n> ").lower()
+                                if use_suggested == 'y':
+                                    note_content = suggested_note
+                                else:
+                                    note_content = input("What's the note content?\n> ")
+                            else:
+                                note_content = input("What's the note content?\n> ")
                         else:
                             note_content = input("What's the note content?\n> ")
-                    else:
+                    except Exception as e:
+                        print(f"Error generating note suggestion: {str(e)}")
                         note_content = input("What's the note content?\n> ")
-                except Exception as e:
-                    print(f"Error generating note suggestion: {str(e)}")
+                else:
                     note_content = input("What's the note content?\n> ")
-            else:
-                note_content = input("What's the note content?\n> ")
+                
+                note_id = f"Note{builder.current_note_id}"
+                builder.notes.append(ProcessNote(note_id, note_content, step_id))
+                builder.current_note_id += 1
             
-            note_id = f"Note{builder.current_note_id}"
-            builder.notes.append(ProcessNote(note_id, note_content, step_id))
-            builder.current_note_id += 1
-        
-        # Get validation rules with AI suggestion
-        if builder.openai_client:
-            try:
-                show_loading_animation("Generating validation rules suggestion", in_menu=True)
-                suggested_rules = builder.generate_validation_rules(
-                    step_id, description, decision, success_outcome, failure_outcome
-                )
-                if suggested_rules:
-                    print(f"AI suggests the following validation rules:\n{suggested_rules}")
-                    use_suggested = input("Would you like to use these validation rules? (y/n)\n> ").lower()
-                    if use_suggested == 'y':
-                        validation_rules = suggested_rules
+            # Get validation rules with optional AI suggestion
+            if builder.openai_client:
+                try:
+                    want_suggestion = input("Would you like an AI suggestion for validation rules? (y/n)\n> ").lower()
+                    if want_suggestion == 'y':
+                        show_loading_animation("Generating validation rules suggestion", in_menu=True)
+                        suggested_rules = builder.generate_validation_rules(step_id, description)
+                        if suggested_rules:
+                            print(f"AI suggests the following validation rules: '{suggested_rules}'")
+                            use_suggested = input("Would you like to use these rules? (y/n)\n> ").lower()
+                            if use_suggested == 'y':
+                                validation_rules = suggested_rules
+                            else:
+                                validation_rules = input("What are the validation rules for this step? (Press Enter to skip)\n> ").strip()
+                                if not validation_rules:  # If empty, set to None
+                                    validation_rules = None
+                        else:
+                            validation_rules = input("What are the validation rules for this step? (Press Enter to skip)\n> ").strip()
+                            if not validation_rules:  # If empty, set to None
+                                validation_rules = None
                     else:
                         validation_rules = input("What are the validation rules for this step? (Press Enter to skip)\n> ").strip()
                         if not validation_rules:  # If empty, set to None
                             validation_rules = None
-                else:
+                except Exception as e:
+                    print(f"Error generating validation rules suggestion: {str(e)}")
                     validation_rules = input("What are the validation rules for this step? (Press Enter to skip)\n> ").strip()
                     if not validation_rules:  # If empty, set to None
                         validation_rules = None
-            except Exception as e:
-                print(f"Error generating validation rules suggestion: {str(e)}")
+            else:
+                # No AI client available, use manual input
                 validation_rules = input("What are the validation rules for this step? (Press Enter to skip)\n> ").strip()
                 if not validation_rules:  # If empty, set to None
                     validation_rules = None
-        else:
-            validation_rules = input("What are the validation rules for this step? (Press Enter to skip)\n> ").strip()
-            if not validation_rules:  # If empty, set to None
-                validation_rules = None
-        
-        # Get error codes with AI suggestion
-        if builder.openai_client:
-            try:
-                show_loading_animation("Generating error codes suggestion", in_menu=True)
-                suggested_codes = builder.generate_error_codes(
-                    step_id, description, decision, success_outcome, failure_outcome
-                )
-                if suggested_codes:
-                    print(f"AI suggests the following error codes:\n{suggested_codes}")
-                    use_suggested = input("Would you like to use these error codes? (y/n)\n> ").lower()
-                    if use_suggested == 'y':
-                        error_codes = suggested_codes
+            
+            # Create the step with all gathered information
+            step = ProcessStep(
+                step_id=step_id,
+                description=description,
+                decision=decision,
+                success_outcome=success_outcome,
+                failure_outcome=failure_outcome,
+                note_id=note_id,
+                next_step_success=next_step_success,
+                next_step_failure=next_step_failure,
+                validation_rules=validation_rules,
+                error_codes=None  # We'll set this later
+            )
+            
+            # Get error codes with optional AI suggestion
+            if builder.openai_client:
+                try:
+                    want_suggestion = input("Would you like an AI suggestion for error codes? (y/n)\n> ").lower()
+                    if want_suggestion == 'y':
+                        show_loading_animation("Generating error codes suggestion", in_menu=True)
+                        suggested_codes = builder.generate_error_codes(
+                            step_id, description, decision, success_outcome, failure_outcome
+                        )
+                        if suggested_codes:
+                            print(f"AI suggests the following error codes:\n{suggested_codes}")
+                            use_suggested = input("Would you like to use these error codes? (y/n)\n> ").lower()
+                            if use_suggested == 'y':
+                                error_codes = suggested_codes
+                            else:
+                                error_codes = input("Any specific error codes? (Press Enter to skip)\n> ").strip()
+                                if not error_codes:  # If empty, set to None
+                                    error_codes = None
+                        else:
+                            error_codes = input("Any specific error codes? (Press Enter to skip)\n> ").strip()
+                            if not error_codes:  # If empty, set to None
+                                error_codes = None
                     else:
                         error_codes = input("Any specific error codes? (Press Enter to skip)\n> ").strip()
                         if not error_codes:  # If empty, set to None
                             error_codes = None
-                else:
+                except Exception as e:
+                    print(f"Error generating error codes suggestion: {str(e)}")
                     error_codes = input("Any specific error codes? (Press Enter to skip)\n> ").strip()
                     if not error_codes:  # If empty, set to None
                         error_codes = None
-            except Exception as e:
-                print(f"Error generating error codes suggestion: {str(e)}")
+            else:
                 error_codes = input("Any specific error codes? (Press Enter to skip)\n> ").strip()
                 if not error_codes:  # If empty, set to None
                     error_codes = None
-        else:
-            error_codes = input("Any specific error codes? (Press Enter to skip)\n> ").strip()
-            if not error_codes:  # If empty, set to None
-                error_codes = None
-        
-        # Create the step
-        step = ProcessStep(
-            step_id=step_id,
-            description=description,
-            decision=decision,
-            success_outcome=success_outcome,
-            failure_outcome=failure_outcome,
-            note_id=note_id,
-            next_step_success=next_step_success,
-            next_step_failure=next_step_failure,
-            validation_rules=validation_rules,
-            error_codes=error_codes
-        )
-        
-        # Add the step and check for issues
-        issues = builder.add_step(step)
-        if issues:
-            print("\n=== Validation Issues ===")
-            for issue in issues:
-                print(f"- {issue}")
-            print("\nPlease fix these issues and try again.")
-            continue
-        
-        # Ask if user wants to add another step
-        continue_process = get_step_input("Add another step? (y/n)\n> ").lower()
-        if continue_process != 'y':
-            break
-    
-    # Generate outputs
+            
+            # Update the error codes in the step
+            step.error_codes = error_codes
+            
+            # Add the step and check for issues
+            issues = builder.add_step(step)
+            if issues:
+                print("\n=== Validation Issues ===")
+                for issue in issues:
+                    print(f"- {issue}")
+                print("\nPlease fix these issues and try again.")
+                continue
+            
+            # Ask if user wants to add another step
+            continue_process = get_step_input("Add another step? (y/n)\n> ").lower()
+            if continue_process != 'y':
+                break
+    except KeyboardInterrupt:
+        clear_screen()
+        print("\nProcess building interrupted. Returning to main menu...")
+        return
+
+    # Generate outputs (after the try-except block)
     builder.generate_csv()
     builder.generate_mermaid_diagram()
     
@@ -482,260 +550,7 @@ def run_interview(builder: ProcessBuilder) -> None:
         summary_file.write_text(executive_summary)
         print(f"Executive summary saved to: {summary_file}")
 
-    # Add menu system for viewing and editing steps
-    def show_menu():
-        # Don't clear the screen when showing the menu to maintain visibility
-        print("\n" + "="*50)
-        print("=======  Process Builder Menu  =======")
-        print("="*50)
-        print()  # Consistent spacing
-        print("1. View all steps with flow connections")
-        print("2. Edit a step")
-        print("3. Add a new step")
-        print("4. Exit")
-        print("="*50)
-        print()  # Add consistent spacing after menu options
-    # Display initial menu to start the interaction
-    show_menu()
-    
-    while True:
-        choice = input("Enter your choice (1-4): ").strip()
-        
-        if choice == "1":
-            # View all steps with flow connections
-            print("\n" + "="*50)
-            print("=======  Process Steps  =======")
-            print("="*50)
-            print()  # Add extra spacing for better readability
-            for i, step in enumerate(builder.steps, 1):
-                # Find predecessor steps
-                predecessors = []
-                for other_step in builder.steps:
-                    if other_step.next_step_success == step.step_id:
-                        predecessors.append(f"{other_step.step_id} (success)")
-                    if other_step.next_step_failure == step.step_id:
-                        predecessors.append(f"{other_step.step_id} (failure)")
-                
-                print(f"\nStep {i}: {step.step_id}")
-                print(f"Description: {step.description}")
-                print(f"Decision: {step.decision}")
-                print(f"Success Outcome: {step.success_outcome}")
-                print(f"Failure Outcome: {step.failure_outcome}")
-                
-                # Show flow connections
-                if predecessors:
-                    print("\nPredecessors:")
-                    for pred in predecessors:
-                        print(f"  - {pred}")
-                else:
-                    print("\nPredecessors: None (Start of process)")
-                # Show next steps
-                print("\nNext Steps:")
-                if step.next_step_success.lower() == 'end':
-                    print("  - End (Success)")
-                else:
-                    print(f"  - {step.next_step_success} (Success)")
-                if step.next_step_failure.lower() == 'end':
-                    print("  - End (Failure)")
-                else:
-                    print(f"  - {step.next_step_failure} (Failure)")
-                
-                # Show additional details
-                if step.note_id:
-                    note = next(n for n in builder.notes if n.note_id == step.note_id)
-                    print(f"\nNote: {note.content}")
-                if step.validation_rules:
-                    print(f"\nValidation Rules: {step.validation_rules}")
-                if step.error_codes:
-                    print(f"\nError Codes: {step.error_codes}")
-                print("-" * 80)  # Separator between steps
-            # Clear spacing before menu redisplay
-            print("\n" + "="*50)
-            print()
-            print("All steps displayed. What would you like to do next?")
-            # Redisplay menu after viewing steps
-            show_menu()
-        elif choice == "2":
-            # Edit a step
-            if not builder.steps:
-                print("\nNo steps to edit. Please add a step first.")
-                continue
-            print("\n" + "="*50)
-            print("=======  Edit Step  =======")
-            print("="*50)
-            print()  # Add extra spacing for better readability
-            
-            # Display all steps for selection
-            print("\nAvailable steps:")
-            for i, step in enumerate(builder.steps, 1):
-                print(f"{i}. {step.step_id}")
-            
-            try:
-                step_num = int(input("\nEnter step number to edit: ").strip())
-                
-                if 1 <= step_num <= len(builder.steps):
-                    step = builder.steps[step_num - 1]
-                    print("\n" + "="*50)
-                    print(f"=======  Edit options for step: {step.step_id}  =======")
-                    print("="*50)
-                    print()
-                    print("1. Title")
-                    print("2. Description")
-                    print("3. Decision")
-                    print("4. Success Outcome")
-                    print("5. Failure Outcome")
-                    print("6. Note")
-                    print("7. Validation Rules")
-                    print("8. Error Codes")
-                    print("9. Next Step (Success)")
-                    print("10. Next Step (Failure)")
-                    print("11. Cancel")
-                    print()  # Add consistent spacing
-                    # Display edit menu with clear separation
-                    edit_choice = input("Enter your choice (1-11): ").strip()
-                    
-                    if edit_choice == "1":
-                        print(f"\nCurrent title: {step.step_id}")
-                        new_title = input("Enter new title: ").strip()
-                        if new_title:
-                            step.step_id = new_title
-                            print(f"Title updated to: {new_title}")
-                        else:
-                            print("Title unchanged.")
-                    elif edit_choice == "2":
-                        print(f"\nCurrent description: {step.description}")
-                        new_description = input("Enter new description: ").strip()
-                        if new_description:
-                            step.description = new_description
-                            print(f"Description updated.")
-                        else:
-                            print("Description unchanged.")
-                    elif edit_choice == "3":
-                        print(f"\nCurrent decision: {step.decision}")
-                        new_decision = input("Enter new decision: ").strip()
-                        if new_decision:
-                            step.decision = new_decision
-                            print(f"Decision updated.")
-                        else:
-                            print("Decision unchanged.")
-                    elif edit_choice == "4":
-                        print(f"\nCurrent success outcome: {step.success_outcome}")
-                        new_success = input("Enter new success outcome: ").strip()
-                        if new_success:
-                            step.success_outcome = new_success
-                            print(f"Success outcome updated.")
-                        else:
-                            print("Success outcome unchanged.")
-                    elif edit_choice == "5":
-                        print(f"\nCurrent failure outcome: {step.failure_outcome}")
-                        new_failure = input("Enter new failure outcome: ").strip()
-                        if new_failure:
-                            step.failure_outcome = new_failure
-                            print(f"Failure outcome updated.")
-                        else:
-                            print("Failure outcome unchanged.")
-                    elif edit_choice == "6":
-                        print("\nEdit Note:")
-                        if step.note_id:
-                            note = next(n for n in builder.notes if n.note_id == step.note_id)
-                            new_note = input("Enter new note content: ").strip()
-                            if new_note:
-                                note.content = new_note
-                        else:
-                            add_note = input("No note exists. Would you like to add one? (y/n): ").lower()
-                            if add_note == 'y':
-                                note_content = input("Enter note content: ").strip()
-                                if note_content:
-                                    note_id = f"Note{builder.current_note_id}"
-                                    builder.notes.append(ProcessNote(note_id, note_content, step.step_id))
-                                    step.note_id = note_id
-                                    builder.current_note_id += 1
-                    elif edit_choice == "7":
-                        print("\nEdit Validation Rules:")
-                        if step.validation_rules:
-                            print(f"Current validation rules: {step.validation_rules}")
-                        new_rules = input("Enter new validation rules: ").strip()
-                        step.validation_rules = new_rules if new_rules else None
-                    elif edit_choice == "8":
-                        print("\nEdit Error Codes:")
-                        if step.error_codes:
-                            print(f"Current error codes: {step.error_codes}")
-                        new_codes = input("Enter new error codes: ").strip()
-                        step.error_codes = new_codes if new_codes else None
-                    elif edit_choice == "9":
-                        print(f"\nCurrent next step for success: {step.next_step_success}")
-                        while True:
-                            new_next = input("Enter new next step for success (or 'End'): ").strip()
-                            if builder.validate_next_step(new_next):
-                                step.next_step_success = new_next
-                                break
-                            print("Please enter a valid step name or 'End'")
-                    elif edit_choice == "10":
-                        print(f"\nCurrent next step for failure: {step.next_step_failure}")
-                        while True:
-                            new_next = input("Enter new next step for failure (or 'End'): ").strip()
-                            if builder.validate_next_step(new_next):
-                                step.next_step_failure = new_next
-                                break
-                            print("Please enter a valid step name or 'End'")
-                    elif edit_choice == "11":
-                        print("\nEdit cancelled.")
-                        continue
-                    else:
-                        print("\nInvalid choice. Please try again.")
-                    # Validate the process flow after editing
-                    print("\nValidating process flow after edit...")
-                    flow_issues = builder.validate_process_flow()
-                    if flow_issues:
-                        print("\n" + "="*50)
-                        print("=======  Process Flow Validation Issues  =======")
-                        print("="*50)
-                        print()
-                        for issue in flow_issues:
-                            print(f"- {issue}")
-                        print("\nPlease fix these issues in the next edit.")
-                        print("The edit has been saved, but you may want to review these issues.")
-                    else:
-                        print("\nEdit successful! No validation issues found.")
-                        print("The process flow is valid.")
-                else:
-                    print("\nInvalid step number. Please try again.")
-            except ValueError:
-                print("\nPlease enter a valid number.")
-            except Exception as e:
-                print(f"\nAn error occurred while editing: {str(e)}")
-                
-            # Clear separation before redisplaying menu
-            print("\n" + "="*50)
-            print()
-            print("Step editing complete. What would you like to do next?")
-            show_menu()
-        elif choice == "3":
-            # Add a new step
-            run_interview(builder)  # Use the existing interview function to add a step
-            
-            # Clear separation before menu
-            print("\n" + "="*50)
-            print()
-            print("Step added successfully! What would you like to do next?")
-            # Redisplay menu after adding a step
-            show_menu()
-        elif choice == "4":
-            # Exit
-            print("\nExiting Process Builder menu. Your process has been saved.")
-            break
-        else:
-            # Invalid choice
-            print("\nInvalid choice. Please try again.")
-            
-            # Clear separation before redisplaying menu
-            print("\n" + "="*50)
-            print()
-            print("Please select a valid option.")
-            # Redisplay menu after invalid choice
-            show_menu()
 def load_from_csv(builder: ProcessBuilder, steps_csv_path: Path, notes_csv_path: Optional[Path] = None) -> None:
-    import csv
     
     # Load steps from CSV
     try:
@@ -784,6 +599,299 @@ def load_from_csv(builder: ProcessBuilder, steps_csv_path: Path, notes_csv_path:
             print(f"Error: Notes CSV file not found: {notes_csv_path}")
             sys.exit(1)
 
+def clear_screen() -> None:
+    """Clear the terminal screen."""
+    if sys.platform.startswith('win'):
+        os.system('cls')
+    else:
+        os.system('clear')
+
+def get_terminal_height() -> int:
+    """Get terminal height in a cross-platform way."""
+    try:
+        # Try using os.get_terminal_size
+        if hasattr(os, 'get_terminal_size'):
+            return os.get_terminal_size().lines
+        # Fall back to environment variables
+        elif 'LINES' in os.environ:
+            return int(os.environ['LINES'])
+        # Default if nothing else works
+        else:
+            return 24
+    except (OSError, ValueError):
+        return 24  # Safe default
+
+def show_menu(process_name: str = None) -> None:
+    """Show the main menu options.
+    
+    Args:
+        process_name: Optional process name to display in header
+    """
+    # Clear the screen first
+    clear_screen()
+    
+    # Show the process header if a name is provided
+    if process_name:
+        print(f"\n=== Process Builder: {process_name} ===\n")
+    
+    # Calculate available terminal height
+    # Calculate available terminal height
+    terminal_height = get_terminal_height()
+    
+    # Create space to push menu to bottom of screen (accounting for header and menu lines)
+    header_lines = 3 if process_name else 0
+    menu_lines = 3  # The menu itself takes 3 lines
+    input_buffer = 2  # Space for input prompt
+    content_buffer = 4  # Space to leave for content above menu
+    
+    # Calculate exact padding needed to position menu at bottom
+    # Use a smaller buffer to ensure menu stays at bottom but content is visible
+    padding_lines = max(1, terminal_height - header_lines - menu_lines - input_buffer - content_buffer)
+    
+    # Add just enough padding to position the menu near the bottom
+    if padding_lines > 20:  # If terminal is very tall, don't add excessive whitespace
+        padding_lines = 8  # Reduced for less empty space
+    print("\n" * padding_lines)
+    print("─" * 40)
+    print("Process Builder: 1:View | 2:Edit | 3:Add | 4:Output | 5:Exit")
+    print("─" * 40)
+
+def view_all_steps(builder: ProcessBuilder) -> None:
+    """Display all steps with their details and connections."""
+    if not builder.steps:
+        print("\nNo steps available. Please add steps first using option 3.")
+        return
+    
+    print("="*40)
+    print("=======  Process Steps  =======")
+    print("="*40)
+    print()  # Add space for better readability
+    for i, step in enumerate(builder.steps, 1):
+        # Find predecessor steps
+        predecessors = []
+        for other_step in builder.steps:
+            if other_step.next_step_success == step.step_id:
+                predecessors.append(f"{other_step.step_id} (success)")
+            if other_step.next_step_failure == step.step_id:
+                predecessors.append(f"{other_step.step_id} (failure)")
+        
+        print(f"\nStep {i}: {step.step_id}")
+        print(f"Description: {step.description}")
+        print(f"Decision: {step.decision}")
+        print(f"Success Outcome: {step.success_outcome}")
+        print(f"Failure Outcome: {step.failure_outcome}")
+        
+        # Show flow connections
+        if predecessors:
+            print("\nPredecessors:")
+            for pred in predecessors:
+                print(f"  - {pred}")
+        else:
+            print("\nPredecessors: None (Start of process)")
+        # Show next steps
+        print("\nNext Steps:")
+        if step.next_step_success.lower() == 'end':
+            print("  - End (Success)")
+        else:
+            print(f"  - {step.next_step_success} (Success)")
+        if step.next_step_failure.lower() == 'end':
+            print("  - End (Failure)")
+        else:
+            print(f"  - {step.next_step_failure} (Failure)")
+        
+        # Show additional details
+        if step.note_id:
+            note = next(n for n in builder.notes if n.note_id == step.note_id)
+            print(f"\nNote: {note.content}")
+        if step.validation_rules:
+            print(f"\nValidation Rules: {step.validation_rules}")
+        if step.error_codes:
+            print(f"\nError Codes: {step.error_codes}")
+        print("-" * 40)  # Separator between steps
+def edit_step(builder: ProcessBuilder) -> None:
+    """Edit an existing step."""
+    if not builder.steps:
+        print("\nNo steps to edit. Please add a step first.")
+        return
+        
+    print("="*40)
+    print("=======  Edit Step  =======")
+    print("="*40)
+    print()  # Add extra spacing for better readability
+    
+    # Display all steps for selection
+    print("\nAvailable steps:")
+    for i, step in enumerate(builder.steps, 1):
+        print(f"{i}. {step.step_id}")
+    
+    try:
+        step_num = int(input("\nEnter step number to edit: ").strip())
+        
+        if 1 <= step_num <= len(builder.steps):
+            # Get the actual step by index
+            step = builder.steps[step_num-1]
+            
+            # Show edit options
+            print("="*40)
+            print(f"=======  Edit options for step: {step.step_id}  =======")
+            print("="*40)
+            print("1. Title")
+            print("2. Description")
+            print("3. Decision")
+            print("4. Success Outcome")
+            print("5. Failure Outcome")
+            print("6. Note")
+            print("7. Validation Rules")
+            print("8. Error Codes")
+            print("9. Next Step (Success)")
+            print("10. Next Step (Failure)")
+            print("11. Cancel")
+            print()  # Add consistent spacing
+            # Display edit menu with clear separation
+            edit_choice = input("Enter your choice (1-11): ").strip()
+            
+            if edit_choice == "1":
+                print(f"\nCurrent title: {step.step_id}")
+                new_title = input("Enter new title: ").strip()
+                if new_title:
+                    step.step_id = new_title
+                    print(f"Title updated to: {new_title}")
+                else:
+                    print("Title unchanged.")
+            elif edit_choice == "2":
+                print(f"\nCurrent description: {step.description}")
+                new_description = input("Enter new description: ").strip()
+                if new_description:
+                    step.description = new_description
+                    print(f"Description updated.")
+                else:
+                    print("Description unchanged.")
+            elif edit_choice == "3":
+                print(f"\nCurrent decision: {step.decision}")
+                new_decision = input("Enter new decision: ").strip()
+                if new_decision:
+                    step.decision = new_decision
+                    print(f"Decision updated.")
+                else:
+                    print("Decision unchanged.")
+            elif edit_choice == "4":
+                print(f"\nCurrent success outcome: {step.success_outcome}")
+                new_success = input("Enter new success outcome: ").strip()
+                if new_success:
+                    step.success_outcome = new_success
+                    print(f"Success outcome updated.")
+                else:
+                    print("Success outcome unchanged.")
+            elif edit_choice == "5":
+                print(f"\nCurrent failure outcome: {step.failure_outcome}")
+                new_failure = input("Enter new failure outcome: ").strip()
+                if new_failure:
+                    step.failure_outcome = new_failure
+                    print(f"Failure outcome updated.")
+                else:
+                    print("Failure outcome unchanged.")
+            elif edit_choice == "6":
+                print("\nEdit Note:")
+                if step.note_id:
+                    note = next(n for n in builder.notes if n.note_id == step.note_id)
+                    new_note = input("Enter new note content: ").strip()
+                    if new_note:
+                        note.content = new_note
+                else:
+                    add_note = input("No note exists. Would you like to add one? (y/n): ").lower()
+                    if add_note == 'y':
+                        note_content = input("Enter note content: ").strip()
+                        if note_content:
+                            note_id = f"Note{builder.current_note_id}"
+                            builder.notes.append(ProcessNote(note_id, note_content, step.step_id))
+                            step.note_id = note_id
+                            builder.current_note_id += 1
+            elif edit_choice == "7":
+                print("\nEdit Validation Rules:")
+                if step.validation_rules:
+                    print(f"Current validation rules: {step.validation_rules}")
+                new_rules = input("Enter new validation rules: ").strip()
+                step.validation_rules = new_rules if new_rules else None
+            elif edit_choice == "8":
+                print("\nEdit Error Codes:")
+                if step.error_codes:
+                    print(f"Current error codes: {step.error_codes}")
+                new_codes = input("Enter new error codes: ").strip()
+                step.error_codes = new_codes if new_codes else None
+            elif edit_choice == "9":
+                print(f"\nCurrent next step for success: {step.next_step_success}")
+                while True:
+                    new_next = input("Enter new next step for success (or 'End'): ").strip()
+                    if builder.validate_next_step(new_next):
+                        step.next_step_success = new_next
+                        break
+                    print("Please enter a valid step name or 'End'")
+            elif edit_choice == "10":
+                print(f"\nCurrent next step for failure: {step.next_step_failure}")
+                while True:
+                    new_next = input("Enter new next step for failure (or 'End'): ").strip()
+                    if builder.validate_next_step(new_next):
+                        step.next_step_failure = new_next
+                        break
+                    print("Please enter a valid step name or 'End'")
+            elif edit_choice == "11":
+                print("\nEdit cancelled.")
+                return
+            else:
+                print("\nInvalid choice. Please try again.")
+            # Validate the process flow after editing
+            print("\nValidating process flow after edit...")
+            flow_issues = builder.validate_process_flow()
+            if flow_issues:
+                print("="*40)
+                print("=======  Process Flow Validation Issues  =======")
+                print("="*40)
+                print()
+                for issue in flow_issues:
+                    print(f"- {issue}")
+                print("\nPlease fix these issues in the next edit.")
+                print("The edit has been saved, but you may want to review these issues.")
+            else:
+                print("\nEdit successful! No validation issues found.")
+                print("The process flow is valid.")
+        else:
+            print("\nInvalid step number. Please try again.")
+    except ValueError:
+        print("\nPlease enter a valid number.")
+    except Exception as e:
+        print(f"\nAn error occurred while editing: {str(e)}")
+
+def generate_outputs(builder: ProcessBuilder) -> None:
+    """Generate all outputs for the process."""
+    if not builder.steps:
+        print("\nNo steps available. Please add steps first using option 3.")
+        return
+        
+    # Generate outputs
+    print("\nGenerating outputs...")
+    builder.generate_csv()
+    builder.generate_mermaid_diagram()
+    
+    # Generate and save LLM prompt
+    llm_prompt = builder.generate_llm_prompt()
+    print("\n=== LLM Prompt ===")
+    print(llm_prompt)
+    
+    if builder.output_dir:
+        prompt_file = builder.output_dir / f"{builder.process_name}_prompt.txt"
+        prompt_file.write_text(llm_prompt)
+        print(f"LLM prompt saved to: {prompt_file}")
+    
+    # Generate and save executive summary
+    executive_summary = builder.generate_executive_summary()
+    print("\n=== Executive Summary ===")
+    print(executive_summary)
+    
+    if builder.output_dir:
+        summary_file = builder.output_dir / f"{builder.process_name}_executive_summary.md"
+        summary_file.write_text(executive_summary)
+        print(f"Executive summary saved to: {summary_file}")
+
 def main() -> None:
     """Main entry point for the process builder."""
     parser = argparse.ArgumentParser(description="Process Builder Utility")
@@ -803,17 +911,65 @@ def main() -> None:
     config = Config()
     builder = ProcessBuilder(process_name, config)
     
-    # Determine if we're loading from CSV or running an interview
+    # Determine if we're loading from CSV
     if args.steps_csv:
-        load_from_csv(builder, Path(args.steps_csv), Path(args.notes_csv) if args.notes_csv else None)
-        
-        # Generate outputs
-        builder.generate_csv()
-        builder.generate_mermaid_diagram()
-        builder.generate_executive_summary()
-    else:
-        # Run the interactive interview
-        run_interview(builder)
-
-if __name__ == "__main__":
-    main() 
+        steps_path = Path(args.steps_csv)
+        notes_path = Path(args.notes_csv) if args.notes_csv else None
+        load_from_csv(builder, steps_path, notes_path)
+    
+    # Main menu loop
+    while True:
+        try:
+            # Show menu with process header
+            show_menu(process_name)
+            choice = input("Enter your choice (1-5): ").strip()
+            
+            if choice == "1":
+                # Clear screen before showing content
+                clear_screen()
+                print(f"\n=== Process Builder: {process_name} - View Steps ===\n")
+                view_all_steps(builder)
+                print()  # Single line break for consistent spacing
+                input("Press Enter to return to menu...")
+            elif choice == "2":
+                # Clear screen before showing content
+                clear_screen()
+                print(f"\n=== Process Builder: {process_name} - Edit Step ===\n")
+                edit_step(builder)
+                print()  # Single line break for consistent spacing
+                input("Press Enter to return to menu...")
+            elif choice == "3":
+                # Clear screen before showing content
+                clear_screen()
+                # run_interview handles its own process header
+                run_interview(builder)
+                print()  # Single line break for consistent spacing
+                input("Press Enter to return to menu...")
+                
+            elif choice == "4":
+                # Clear screen before showing content
+                clear_screen()
+                print(f"\n=== Process Builder: {process_name} - Generate Outputs ===\n")
+                generate_outputs(builder)
+                print()  # Single line break for consistent spacing
+                input("Press Enter to return to menu...")
+                
+            elif choice == "5":
+                # Exit
+                clear_screen()
+                print("\nExiting Process Builder. Your process has been saved.")
+                break
+                
+            else:
+                # Invalid choice - show error and wait
+                clear_screen()
+                print(f"\n=== Process Builder: {process_name} ===\n")
+                print("\nInvalid choice. Please try again.")
+                print()  # Single line break for consistent spacing
+                input("Press Enter to return to menu...")
+                
+        except KeyboardInterrupt:
+            # Handle Ctrl+C gracefully
+            clear_screen()
+            print("\nOperation interrupted. Returning to main menu...")
+            time.sleep(1)  # Brief pause to show the message

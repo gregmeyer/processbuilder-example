@@ -110,6 +110,49 @@ Please provide just the step title, no additional text."""
             print(f"Error generating first step title: {str(e)}")
             return "Initial Step"
 
+    def generate_next_step_title(self) -> str:
+        """Generate an intelligent next step title based on the process context."""
+        if not self.openai_client:
+            return "Next Step"
+            
+        try:
+            # Get the last step for context
+            last_step = self.steps[-1] if self.steps else None
+            if not last_step:
+                return self.generate_first_step_title()
+                
+            prompt = f"""Given the process name "{self.process_name}" and the current step context:
+
+Last Step: {last_step.step_id}
+Step Description: {last_step.description}
+Decision: {last_step.decision}
+Success Outcome: {last_step.success_outcome}
+Failure Outcome: {last_step.failure_outcome}
+
+Suggest an appropriate title for the next step in this process. The title should:
+1. Be clear and descriptive
+2. Start with a verb
+3. Be specific to what would logically follow in this process
+4. Be concise (2-5 words)
+5. Follow business process naming conventions
+
+Please provide just the step title, no additional text."""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are a business process expert. Create clear, concise step titles that follow best practices."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=50
+            )
+            
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Error generating next step title: {str(e)}")
+            return "Next Step"
+
     def find_missing_steps(self) -> List[Tuple[str, str, str]]:
         """Find steps that are referenced but don't exist yet.
         
@@ -1011,8 +1054,17 @@ Format the response in clear sections with appropriate headers.
         print(llm_prompt)
         
         if self.output_dir:
-            prompt_file = self.output_dir / f"{self.process_name}_prompt.txt"
-            prompt_file.write_text(llm_prompt)
+            # Create Path object if self.output_dir is a string
+            output_dir = Path(self.output_dir) if isinstance(self.output_dir, str) else self.output_dir
+            prompt_file = output_dir / f"{self.process_name}_prompt.txt"
+            
+            # Use write_text if it's a Path object, otherwise use open()
+            if hasattr(prompt_file, 'write_text'):
+                prompt_file.write_text(llm_prompt)
+            else:
+                with open(prompt_file, 'w') as f:
+                    f.write(llm_prompt)
+            
             print(f"LLM prompt saved to: {prompt_file}")
         
         # Generate and save executive summary
@@ -1021,8 +1073,17 @@ Format the response in clear sections with appropriate headers.
         print(executive_summary)
         
         if self.output_dir:
-            summary_file = self.output_dir / f"{self.process_name}_executive_summary.md"
-            summary_file.write_text(executive_summary)
+            # Create Path object if self.output_dir is a string
+            output_dir = Path(self.output_dir) if isinstance(self.output_dir, str) else self.output_dir
+            summary_file = output_dir / f"{self.process_name}_executive_summary.md"
+            
+            # Use write_text if it's a Path object, otherwise use open()
+            if hasattr(summary_file, 'write_text'):
+                summary_file.write_text(executive_summary)
+            else:
+                with open(summary_file, 'w') as f:
+                    f.write(executive_summary)
+            
             print(f"Executive summary saved to: {summary_file}")
 
     def view_all_steps(self) -> None:
