@@ -316,3 +316,94 @@ Please help me:
 """
         
         return prompt 
+
+    def generate_executive_summary(self) -> str:
+        """Generate an executive summary of the process."""
+        if not self.openai_client:
+            return "AI features are not available - OPENAI_API_KEY not found or invalid."
+            
+        try:
+            # Create a detailed prompt for the executive summary
+            prompt = f"""Create an executive summary for the {self.process_name} process. Here's the process information:
+
+Process Steps:
+"""
+            
+            for step in self.steps:
+                prompt += f"""
+Step {step.step_id}: {step.description}
+- Decision: {step.decision}
+- Success: {step.success_outcome}
+- Failure: {step.failure_outcome}
+"""
+                if step.note_id:
+                    note = next(n for n in self.notes if n.note_id == step.note_id)
+                    prompt += f"- Note: {note.content}\n"
+                
+                if step.validation_rules:
+                    prompt += f"- Validation: {step.validation_rules}\n"
+                if step.error_codes:
+                    prompt += f"- Error Codes: {step.error_codes}\n"
+                if step.retry_logic:
+                    prompt += f"- Retry Logic: {step.retry_logic}\n"
+            
+            prompt += """
+Please create an executive summary that includes:
+1. Process Overview
+2. Key Steps and Decision Points
+3. Success and Failure Paths
+4. Risk Mitigation Strategies
+5. Implementation Considerations
+6. Expected Outcomes
+
+Format the response in clear sections with appropriate headers.
+"""
+            
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are a process documentation expert. Create clear, concise executive summaries for business processes."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1000
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            return f"Error generating executive summary: {str(e)}"
+
+    def run_interview(self) -> None:
+        """Run the interactive interview process."""
+        print(f"\n=== Process Builder: {self.process_name} ===\n")
+        
+        while True:
+            self.add_step()
+            continue_process = self.get_step_input("Add another step? (y/n)").lower()
+            if continue_process != 'y':
+                break
+        
+        # Generate outputs
+        self.generate_csv()
+        self.generate_mermaid_diagram()
+        
+        # Generate and save LLM prompt
+        llm_prompt = self.generate_llm_prompt()
+        print("\n=== LLM Prompt ===")
+        print(llm_prompt)
+        
+        if self.output_dir:
+            prompt_file = self.output_dir / f"{self.process_name}_prompt.txt"
+            prompt_file.write_text(llm_prompt)
+            print(f"LLM prompt saved to: {prompt_file}")
+        
+        # Generate and save executive summary
+        executive_summary = self.generate_executive_summary()
+        print("\n=== Executive Summary ===")
+        print(executive_summary)
+        
+        if self.output_dir:
+            summary_file = self.output_dir / f"{self.process_name}_executive_summary.md"
+            summary_file.write_text(executive_summary)
+            print(f"Executive summary saved to: {summary_file}") 
