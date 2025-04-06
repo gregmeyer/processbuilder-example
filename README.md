@@ -1,100 +1,181 @@
 # Process Builder
 
-A tool for building, documenting, and improving business processes using AI-powered assistance.
+A tool for building structured process definitions through interactive interviews. Generates both CSV output and LLM prompts for process documentation.
 
-## Overview
+## Features
 
-The Process Builder helps teams create, document, and improve their business processes through an interactive interview process. It combines human expertise with AI-powered insights to create better processes and documentation.
-
-Key features:
-- Interactive process discovery
-- AI-powered step evaluation
-- Multiple output formats (CSV, Mermaid diagrams, Markdown)
-- Continuous improvement through feedback loops
+- Interactive process building with AI-powered suggestions
+- AI suggestions for:
+  - Step titles and descriptions
+  - Step decisions and outcomes
+  - Success and failure paths
+  - Validation rules and error codes
+  - Concise step notes (10-20 words)
+- Process validation and flow checking
+- Multiple output formats:
+  - CSV files for process steps and notes
+  - Mermaid diagrams for visual representation
+  - LLM prompts for documentation
+  - Executive summaries
+- Interactive menu system for:
+  - Viewing all steps with flow connections
+  - Editing existing steps
+  - Adding new steps
+  - Managing process flow
 
 ## Installation
 
-1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/process-builder.git
-cd process-builder
-```
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Set up environment variables:
-Create a `.env` file in the root directory with your OpenAI API key:
-```
-OPENAI_API_KEY=your_api_key_here
+pip install processbuilder
 ```
 
 ## Usage
 
-### Basic Usage
+### Interactive Mode
 
-Run the process builder:
-```bash
-python process_builder.py
+1. Run the process builder:
+   ```bash
+   processbuilder
+   ```
+
+2. Enter the process name when prompted.
+
+3. For each step, you'll be guided through:
+   - Step title (with AI suggestion for first step)
+   - Step description (with AI suggestion)
+   - Decision point (with AI suggestion)
+   - Success outcome (with AI suggestion)
+   - Failure outcome (with AI suggestion)
+   - Next steps for both paths (with AI suggestions)
+   - Optional note (with AI suggestion)
+   - Optional validation rules (with AI suggestion)
+   - Optional error codes (with AI suggestion)
+
+4. After completing the process, you'll enter the interactive menu where you can:
+   - View all steps with their flow connections
+   - Edit any step's properties
+   - Add new steps
+   - Exit the process builder
+
+### Step Viewing
+
+When viewing steps, you'll see:
+- Step title and description
+- Decision and outcomes
+- Predecessor steps (steps that lead to this step)
+- Successor steps (next steps for both success and failure paths)
+- Concise notes (10-20 words), validation rules, and error codes
+- Clear visual separation between steps
+
+Example step view:
+```
+Step 1: Verify Customer Information
+Description: Check customer details against database
+Decision: Is the customer information valid?
+Success Outcome: Customer information is verified
+Failure Outcome: Customer information is invalid
+
+Predecessors: None (Start of process)
+
+Successors:
+  - Process Payment (Success)
+  - Request Additional Information (Failure)
+
+Note: Verify email and phone format
+Validation Rules: Email format, phone number format
+Error Codes: INVALID_EMAIL, INVALID_PHONE
+--------------------------------------------------------------------------------
 ```
 
-### Command Line Arguments
+### Step Editing
 
-- `--steps-csv`: Path to CSV file containing process steps
-- `--notes-csv`: Path to CSV file containing process notes
-- `--import-original`: Import from original format CSV instead of current format
+You can edit any step's properties:
+1. Title
+2. Description
+3. Decision
+4. Success Outcome
+5. Failure Outcome
+6. Note
+7. Validation Rules
+8. Error Codes
+9. Next Step (Success)
+10. Next Step (Failure)
 
-Example:
-```bash
-python process_builder.py --steps-csv path/to/steps.csv --notes-csv path/to/notes.csv
+The process flow is validated after each edit to ensure consistency.
+
+### CSV Import Mode
+
+1. Prepare your CSV files:
+   - One file for process steps
+   - Optional file for process notes
+
+2. Run the process builder with CSV files:
+   ```bash
+   processbuilder --steps-csv path/to/steps.csv --notes-csv path/to/notes.csv
+   ```
+
+3. The process will be loaded and you'll enter the interactive menu where you can:
+   - View all steps
+   - Edit steps as needed
+   - Add new steps
+   - Generate outputs
+
+## Output Files
+
+The process builder generates several output files in a structured directory format:
+
+```
+output/
+└── process_name/
+    └── YYYYMMDD_HHMMSS/
+        ├── process_name_process.csv
+        ├── process_name_notes.csv
+        ├── process_name_diagram.mmd
+        ├── process_name_prompt.txt
+        └── process_name_executive_summary.md
 ```
 
-## Security Considerations
+### CSV Format
 
-1. **API Keys**: 
-   - Never commit your `.env` file
-   - Keep your OpenAI API key secure
-   - The tool will work without an API key, but AI features will be disabled
+The process steps CSV includes:
+- Step ID
+- Description
+- Decision
+- Success Outcome
+- Failure Outcome
+- Linked Note ID
+- Next Step (Success)
+- Next Step (Failure)
+- Validation Rules
+- Error Codes
+- Retry Logic
 
-2. **Data Handling**:
-   - The tool processes data locally
-   - No data is stored permanently
-   - CSV files are handled safely with proper validation
+### Validation Rules
 
-3. **File Operations**:
-   - Output files are created in the specified directory
-   - Input files are validated before processing
-   - Proper error handling for file operations
+The process builder enforces several validation rules:
+1. Step names must be unique
+2. Next step references must be valid
+3. Process must have at least one path to 'End'
+4. No circular references allowed
+5. All referenced steps must exist
 
-## Output Formats
+### Error Codes
 
-The tool generates three types of output:
+Common error codes include:
+- INVALID_INPUT
+- VALIDATION_FAILED
+- PROCESS_ERROR
+- TIMEOUT
+- RETRY_EXCEEDED
 
-1. **CSV Files**:
-   - Process steps in structured format
-   - Optional notes for each step
-   - Easy to import into other tools
+## Dependencies
 
-2. **Mermaid Diagrams**:
-   - Visual representation of the process
-   - Interactive flow diagrams
-   - Easy to share with teams
-
-3. **Markdown Documentation**:
-   - Executive summaries
-   - Step-by-step instructions
-   - Process improvements and notes
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+- Python 3.8+
+- OpenAI API (for AI suggestions)
+- python-dotenv (for environment variables)
+- pandas (for CSV handling)
+- mermaid-cli (for diagram generation)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-For support, please open an issue in the GitHub repository. 
+MIT License 
