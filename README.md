@@ -1,100 +1,105 @@
 # Process Builder
 
-A tool for building, documenting, and improving business processes using AI-powered assistance.
+A tool for building structured process definitions through interactive interviews. Generates both CSV output and LLM prompts for process documentation.
 
-## Overview
+## Features
 
-The Process Builder helps teams create, document, and improve their business processes through an interactive interview process. It combines human expertise with AI-powered insights to create better processes and documentation.
-
-Key features:
-- Interactive process discovery
-- AI-powered step evaluation
-- Multiple output formats (CSV, Mermaid diagrams, Markdown)
-- Continuous improvement through feedback loops
+- Interactive interview process for building step-by-step workflows
+- AI-powered step design evaluation
+- CSV export for process steps and notes
+- Mermaid diagram generation for visual process flow
+- LLM prompt generation for process documentation
+- Step title management and step selection
+- Validation of process flow and step references
 
 ## Installation
 
-1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/process-builder.git
-cd process-builder
-```
+# Clone the repository
+git clone https://github.com/yourusername/processbuilder.git
+cd processbuilder
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Set up environment variables:
-Create a `.env` file in the root directory with your OpenAI API key:
-```
-OPENAI_API_KEY=your_api_key_here
+# Install the package
+pip install -e .
 ```
 
 ## Usage
 
-### Basic Usage
+### Interactive Mode
 
-Run the process builder:
+Run the process builder in interactive mode:
+
 ```bash
-python process_builder.py
+processbuilder
 ```
 
-### Command Line Arguments
+The tool will guide you through:
+1. Entering the process name
+2. For each step:
+   - Step title (e.g., "User Authentication", "Data Validation")
+   - Step description
+   - Decision point
+   - Success and failure outcomes
+   - Optional notes
+   - Next step selection (choose from existing steps or create new)
+   - Optional validation rules, error codes, and retry logic
+3. AI evaluation of step design
+4. Option to modify steps based on feedback
+5. Generation of outputs (CSV, Mermaid diagram, LLM prompt)
 
-- `--steps-csv`: Path to CSV file containing process steps
-- `--notes-csv`: Path to CSV file containing process notes
-- `--import-original`: Import from original format CSV instead of current format
+### CSV Import Mode
 
-Example:
+Import process steps and notes from CSV files:
+
 ```bash
-python process_builder.py --steps-csv path/to/steps.csv --notes-csv path/to/notes.csv
+processbuilder --steps-csv path/to/steps.csv --notes-csv path/to/notes.csv
 ```
 
-## Security Considerations
+## Output Files
 
-1. **API Keys**: 
-   - Never commit your `.env` file
-   - Keep your OpenAI API key secure
-   - The tool will work without an API key, but AI features will be disabled
+The tool generates the following files in a timestamped directory:
 
-2. **Data Handling**:
-   - The tool processes data locally
-   - No data is stored permanently
-   - CSV files are handled safely with proper validation
+- `{process_name}_process.csv`: Process steps in CSV format
+- `{process_name}_notes.csv`: Process notes in CSV format
+- `{process_name}_diagram.mmd`: Mermaid diagram of the process flow
+- `{process_name}_prompt.txt`: LLM prompt for process documentation
 
-3. **File Operations**:
-   - Output files are created in the specified directory
-   - Input files are validated before processing
-   - Proper error handling for file operations
+## CSV Format
 
-## Output Formats
+### Process Steps CSV
 
-The tool generates three types of output:
+```csv
+Step ID,Description,Decision,Success Outcome,Failure Outcome,Linked Note ID,Next Step (Success),Next Step (Failure),Validation Rules,Error Codes,Retry Logic
+```
 
-1. **CSV Files**:
-   - Process steps in structured format
-   - Optional notes for each step
-   - Easy to import into other tools
+### Notes CSV
 
-2. **Mermaid Diagrams**:
-   - Visual representation of the process
-   - Interactive flow diagrams
-   - Easy to share with teams
+```csv
+Note ID,Content,Related Step ID
+```
 
-3. **Markdown Documentation**:
-   - Executive summaries
-   - Step-by-step instructions
-   - Process improvements and notes
+## Step Selection
 
-## Contributing
+When defining next steps in the process, you can:
+1. Enter a number corresponding to an existing step
+2. Enter a new step name
+3. Enter 'End' to finish the process
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+The tool will show a numbered list of existing steps to help with selection.
+
+## Requirements
+
+- Python 3.8+
+- OpenAI API key (for AI evaluation features)
+
+## Configuration
+
+Create a `.env` file in the project root with your OpenAI API key:
+
+```env
+OPENAI_API_KEY=your_api_key_here
+```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-For support, please open an issue in the GitHub repository. 
+MIT License 
