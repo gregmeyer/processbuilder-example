@@ -1,0 +1,32 @@
+```mermaid
+graph TD
+    A[User submits web form] --> B{Is it a valid email address?}
+    B -->|Yes| C[Process web form]
+    B -->|No| D[Present error message]
+    C --> E{Does email match existing account?}
+    E -->|No| F[Create new lead]
+    E -->|Yes| G[Update existing lead]
+    F --> H{Is company in target market?}
+    H -->|Yes| I[Add to sales queue]
+    H -->|No| J[Mark as non-target]
+    G --> K{Is lead still active?}
+    K -->|Yes| L[Update lead status]
+    K -->|No| M[Create new opportunity]
+    I --> N{Is queue not full?}
+    N -->|Yes| O[Assign to sales rep]
+    N -->|No| P[Add to waitlist]
+    L --> Q{Is update successful?}
+    Q -->|Yes| R[Confirm update]
+    Q -->|No| S[Log error]
+    M --> T{Is account qualified?}
+    T -->|Yes| U[Create opportunity]
+    T -->|No| V[Mark for review]
+
+    classDef process fill:#E8F5E9,stroke:#66BB6A
+    classDef decision fill:#FFF3E0,stroke:#FFB74D
+    classDef end fill:#FFEBEE,stroke:#E57373
+    
+    class A,C,F,G,I,L,M,O,R,U process
+    class B,E,H,K,N,Q,T decision
+    class D,J,P,S,V end
+``` 

@@ -1,0 +1,8 @@
+Step ID,Description,Decision,Success Outcome,Failure Outcome,Linked Note ID,Next Step (Success),Next Step (Failure),Validation Rules,Error Codes,Retry Logic
+1,User submits web form,Is it a valid email address?,Process the web form,Present an error message,Note1,2,End,Email format validation,INVALID_EMAIL,Allow 3 retries
+2,Process web form,Does the email match an existing account?,Create new lead,Update existing lead,Note2,3,4,Email domain validation,INVALID_DOMAIN,None
+3,Create new lead,Is the company in our target market?,Add to sales queue,Mark as non-target,Note3,5,End,Company size validation,TARGET_MISMATCH,None
+4,Update existing lead,Is the lead still active?,Update lead status,Create new opportunity,Note4,6,7,Lead status validation,LEAD_INACTIVE,None
+5,Add to sales queue,Is the queue not full?,Assign to sales rep,Add to waitlist,Note5,End,End,Queue capacity check,QUEUE_FULL,Check every 24 hours
+6,Update lead status,Is the update successful?,Confirm update,Log error,Note6,End,End,Status transition validation,UPDATE_FAILED,Retry 3 times
+7,Create new opportunity,Is the account qualified?,Create opportunity,Mark for review,Note7,End,End,Account qualification check,NOT_QUALIFIED,None 
