@@ -259,6 +259,11 @@ class ProcessBuilder:
         
         # Always update log level to ensure consistency
         set_log_level(verbose)
+    @property
+    def name(self) -> str:
+        """Return the name of the process."""
+        return self.process_name
+        
     def get_input(self, prompt: str) -> str:
         """Get input from the user with the configured input handler."""
         return self.__class__._input_handler(prompt)
@@ -350,6 +355,39 @@ class ProcessBuilder:
             
         return issues
         
+    def create_step_id(self, title: str) -> str:
+        """Create a valid, unique step ID from a title.
+        
+        Args:
+            title: The title to convert to a step ID
+            
+        Returns:
+            A valid, unique step ID
+        """
+        # Start with the title as the step ID
+        step_id = title
+        
+        # Check for duplicates and add a number if needed
+        if any(step.step_id == step_id for step in self.steps):
+            # Find the highest number suffix for this title
+            base_id = step_id
+            highest_suffix = 0
+            
+            for step in self.steps:
+                if step.step_id == base_id:
+                    highest_suffix = 1
+                elif step.step_id.startswith(f"{base_id}_"):
+                    try:
+                        suffix = int(step.step_id[len(base_id) + 1:])
+                        highest_suffix = max(highest_suffix, suffix)
+                    except ValueError:
+                        pass
+            
+            # Add suffix to make unique
+            step_id = f"{base_id}_{highest_suffix + 1}"
+        
+        return step_id
+
     def find_missing_steps(self) -> List[Tuple[str, str, str]]:
         """Find steps that are referenced but not yet defined.
         
@@ -919,17 +957,51 @@ class ProcessBuilder:
             print(f"Error generating step title: {str(e)}")
             return step_id
 
-    def add_step(self, step: ProcessStep, interactive: bool = True) -> List[str]:
+    def add_step(self, step=None, interactive: bool = True, **kwargs) -> List[str]:
         """Add a new step to the process and validate it.
         
+        This method can be called in two ways:
+        1. With a ProcessStep instance: add_step(step, interactive=True)
+        2. With keyword arguments: add_step(step_id="Step1", description="...", ...)
+        
         Args:
-            step: The ProcessStep to add
+            step: The ProcessStep instance (optional)
             interactive: Whether to use interactive mode for missing steps
                          If False, will auto-generate missing steps without prompts
+            **kwargs: Keyword arguments to create a ProcessStep if not provided directly
         
         Returns:
             List of validation issues, or empty list if validation passed
         """
+        # If a step wasn't provided directly, create one from kwargs
+        if step is None:
+            if not kwargs:
+                return ["No step provided and no attributes specified"]
+            
+            # Import here to avoid circular imports
+            from .models import ProcessStep
+            
+            # Make sure required attributes are present
+            required_attrs = ["step_id", "description", "decision", "success_outcome", "failure_outcome"]
+            missing_attrs = [attr for attr in required_attrs if attr not in kwargs]
+            if missing_attrs:
+                return [f"Missing required attribute(s): {', '.join(missing_attrs)}"]
+            
+            # Create the step
+            step = ProcessStep(
+                step_id=kwargs["step_id"],
+                description=kwargs["description"],
+                decision=kwargs["decision"],
+                success_outcome=kwargs["success_outcome"],
+                failure_outcome=kwargs["failure_outcome"],
+                note_id=kwargs.get("note_id"),
+                next_step_success=kwargs.get("next_step_success", "End"),
+                next_step_failure=kwargs.get("next_step_failure", "End"),
+                validation_rules=kwargs.get("validation_rules"),
+                error_codes=kwargs.get("error_codes"),
+                retry_logic=kwargs.get("retry_logic")
+            )
+        
         # Validate the step
         issues = step.validate()
         
