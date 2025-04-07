@@ -1,0 +1,24 @@
+{
+  "process_name": "TestProcess",
+  "timestamp": "20250406_194030",
+  "current_note_id": 1,
+  "step_count": 1,
+  "steps": [
+    {
+      "step_id": "FirstStep",
+      "description": "This is a test step for state persistence",
+      "decision": "Does this step complete successfully?",
+      "success_outcome": "The step completed successfully",
+      "failure_outcome": "The step failed",
+      "note_id": null,
+      "next_step_success": "End",
+      "next_step_failure": "End",
+      "validation_rules": null,
+      "error_codes": null,
+      "retry_logic": null,
+      "design_feedback": null,
+      "created_at": "2025-04-06T19:40:30.125124"
+    }
+  ],
+  "notes": []
+}
