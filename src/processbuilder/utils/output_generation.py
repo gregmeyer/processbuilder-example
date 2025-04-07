@@ -3,6 +3,8 @@ Functions for generating output files from process steps.
 """
 import logging
 import csv
+import base64
+import requests
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -238,6 +240,30 @@ def generate_mermaid_diagram(steps, notes, process_name: str, timestamp: str,
     # Save to file
     mermaid_file.write_text(diagram)
     print(f"\nMermaid diagram generated: {mermaid_file}")
+    
+    # Generate PNG using Mermaid.INK API
+    try:
+        # Remove the ```mermaid and ``` markers for the API
+        clean_diagram = diagram.replace("```mermaid\n", "").replace("```", "")
+        
+        # Encode the diagram for the API
+        encoded_diagram = base64.b64encode(clean_diagram.encode("utf8")).decode("ascii")
+        
+        # Generate PNG URL
+        png_url = f"https://mermaid.ink/img/{encoded_diagram}?bgColor=white"
+        
+        # Download the PNG
+        response = requests.get(png_url)
+        if response.status_code == 200:
+            png_file = output_dir / f"{process_name}_diagram.png"
+            with open(png_file, "wb") as f:
+                f.write(response.content)
+            print(f"PNG diagram generated: {png_file}")
+        else:
+            log.warning(f"Failed to generate PNG diagram. Status code: {response.status_code}")
+    except Exception as e:
+        log.warning(f"Failed to generate PNG diagram: {str(e)}")
+    
     return diagram
 
 def generate_llm_prompt(steps, notes, process_name: str) -> str:
