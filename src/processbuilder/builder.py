@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import logging
+import json
 from pathlib import Path
 from typing import List, Optional, Tuple, Callable
 import openai
@@ -129,6 +130,14 @@ class ProcessBuilder:
         self.output_dir = None
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.step_count = 0  # Initialize step counter
+        self.state_dir = Path(".processbuilder")
+        
+        # Try to load existing state
+        try:
+            self.load_state()
+            log.debug(f"Loaded existing state for process: {self.process_name}")
+        except Exception as e:
+            log.debug(f"No existing state found or error loading state: {str(e)}")
         
         # Set instance-level verbose mode if specified
         self.verbose = verbose if verbose is not None else self.__class__._verbose
@@ -319,6 +328,27 @@ class ProcessBuilder:
             
         # Return False for any other value
         return False
+            
+    def validate_next_step(self, step: ProcessStep) -> List[str]:
+        """Validate that the next step IDs in the step are valid.
+        
+        Args:
+            step: The step to validate
+            
+        Returns:
+            List of validation issue messages, empty if all is valid
+        """
+        issues = []
+        
+        # Validate next_step_success
+        if not self.validate_next_step_id(step.next_step_success):
+            issues.append(f"Next step on success path '{step.next_step_success}' does not exist")
+            
+        # Validate next_step_failure
+        if not self.validate_next_step_id(step.next_step_failure):
+            issues.append(f"Next step on failure path '{step.next_step_failure}' does not exist")
+            
+        return issues
         
     def find_missing_steps(self) -> List[Tuple[str, str, str]]:
         """Find steps that are referenced but not yet defined.
@@ -642,6 +672,7 @@ class ProcessBuilder:
         success_outcome = "The step completed successfully."
         failure_outcome = "The step failed to complete."
         
+
         # Create and return the step with default values
         step = ProcessStep(
             step_id=step_id,
@@ -649,13 +680,11 @@ class ProcessBuilder:
             decision=decision,
             success_outcome=success_outcome,
             failure_outcome=failure_outcome,
-            note_id=None,
-            next_step_success="End",  # Default to End, will be updated later
-            next_step_failure="End",  # Default to End, will be updated later
+            next_step_success="End",
+            next_step_failure="End",
             validation_rules=None,
             error_codes=None
         )
-        
         return step
 
     def create_missing_step(self, step_id: str, predecessor_id: Optional[str] = None, path_type: Optional[str] = None) -> ProcessStep:
@@ -897,27 +926,30 @@ class ProcessBuilder:
             step: The ProcessStep to add
             interactive: Whether to use interactive mode for missing steps
                          If False, will auto-generate missing steps without prompts
+        
+        Returns:
+            List of validation issues, or empty list if validation passed
         """
         # Validate the step
         issues = step.validate()
+        
+        # Also validate next steps
+        next_step_issues = self.validate_next_step(step)
+        issues.extend(next_step_issues)
+        
         if issues:
-            return issues
-            
-        # Check for duplicate step ID
-        if any(s.step_id == step.step_id for s in self.steps):
-            issues.append(f"Step ID '{step.step_id}' already exists")
             return issues
             
         # Add the step
         self.steps.append(step)
         self.step_count += 1
         
-        # Find and create any missing steps
-        while True:
-            missing_steps = self.find_missing_steps()
-            if not missing_steps:
-                break
-                
+        # Auto-save after adding step
+        self.save_state()
+        
+        # Check for missing steps that need to be created
+        missing_steps = self.find_missing_steps()
+        while missing_steps:
             for missing_step_id, predecessor_id, path_type in missing_steps:
                 # Create the missing step using either interactive or non-interactive mode
                 if interactive:
@@ -936,6 +968,11 @@ class ProcessBuilder:
                         print(f"- {issue}")
                     print("\nPlease fix these issues and try again.")
                     continue
+            
+            # Check if there are still missing steps
+            missing_steps = self.find_missing_steps()
+            if not missing_steps:
+                break
         
         # Validate the process flow
         flow_issues = validate_process_flow(self.steps)
@@ -969,10 +1006,12 @@ class ProcessBuilder:
                 step.note_id = note.note_id
                 break
                 
+        # Auto-save after adding note
+        self.save_state()
+                
         return []
-
     def evaluate_step_design(self, step: ProcessStep) -> str:
-        """Evaluate a step's design using OpenAI."""
+        """Evaluate a step design and provide feedback using OpenAI."""
         if not self.openai_client:
             return "AI evaluation is not available - OPENAI_API_KEY not found or invalid."
             
@@ -1011,7 +1050,7 @@ class ProcessBuilder:
             return response.choices[0].message.content.strip()
         except Exception as e:
             return f"Error evaluating step design: {str(e)}"
-
+            
     def setup_output_directory(self, base_dir: Optional[Path] = None) -> Path:
         """Set up the output directory structure for this run."""
         base_dir = base_dir or self.config.default_output_dir
@@ -1242,93 +1281,210 @@ Please help me:
             
         except Exception as e:
             log.error(f"Error generating executive summary: {str(e)}")
-            return f"Error generating executive summary: {str(e)}"
     def run_interview(self) -> None:
         """Run the interactive interview process."""
-        print(f"\n=== Process Builder: {self.process_name} ===\n")
+        try:
+            print(f"\n=== Process Builder: {self.process_name} ===\n")
         
-        def show_menu():
-            print("\n" + "="*50)
-            print("=== Process Builder Menu ===")
-            print("1. View all steps")
-            print("2. Edit a step")
-            print("3. Add new step")
-            print("4. Generate outputs and exit")
-            print("="*50 + "\n")
-        
-        # Show initial menu
-        show_menu()
-        
-        while True:
-            choice = self.get_input("Enter your choice (1-4):")
+            def show_menu():
+                print("\n" + "="*50)
+                print("=== Process Builder Menu ===")
+                print("1. View all steps")
+                print("2. Edit a step")
+                print("3. Add new step")
+                print("4. Generate outputs and exit")
+                print("="*50 + "\n")
             
-            if choice == '1':
-                self.view_all_steps()
-                # Always redisplay menu after viewing steps
-                show_menu()
-            elif choice == '2':
-                self.edit_step()
-                # Always redisplay menu after editing
-                show_menu()
-            elif choice == '3':
-                self.add_step()
-                # After adding a step, ask if they want to add another
-                while True:
-                    continue_process = self.get_input("\nWould you like to add another step? (y/n)").lower()
-                    if continue_process == 'y':
-                        self.add_step()
+            # Show initial menu
+            show_menu()
+            
+            while True:
+                choice = self.get_input("Enter your choice (1-4):")
+                
+                if choice == '1':
+                    self.view_all_steps()
+                    # Always redisplay menu after viewing steps
+                    show_menu()
+                elif choice == '2':
+                    self.edit_step()
+                    # Always redisplay menu after editing
+                    show_menu()
+                elif choice == '3':
+                    # Create a new step interactively
+                    if len(self.steps) == 0:
+                        # For the first step, offer to use the suggested name
+                        suggested_id = self.suggested_first_step
+                        if suggested_id:
+                            use_suggested = self.get_input(f"\nWould you like to use the suggested first step '{suggested_id}'? (y/n)").lower() == 'y'
+                            if use_suggested:
+                                step_id = suggested_id
+                            else:
+                                step_id = self.get_input("Enter a step ID:")
+                        else:
+                            step_id = self.get_input("Enter a step ID:")
                     else:
-                        break
-                # Always redisplay menu after adding steps
-                show_menu()
-            elif choice == '4':
-                break
-            else:
-                print("Invalid choice. Please try again.")
-                # Always redisplay menu after invalid choice
-                show_menu()
-        
-        # Generate outputs
-        self.generate_csv()
-        self.generate_mermaid_diagram()
-        
-        # Generate and save LLM prompt
-        llm_prompt = self.generate_llm_prompt()
-        print("\n=== LLM Prompt ===")
-        print(llm_prompt)
-        
-        if self.output_dir:
-            # Create Path object if self.output_dir is a string
-            output_dir = Path(self.output_dir) if isinstance(self.output_dir, str) else self.output_dir
-            prompt_file = output_dir / f"{self.process_name}_prompt.txt"
+                        step_id = self.get_input("Enter a step ID:")
+                    
+                    # Create a new step
+                    new_step = self.create_missing_step(step_id)
+                    
+                    # Add the step with validation
+                    validation_issues = self.add_step(new_step, interactive=True)
+                    if validation_issues:
+                        print("\n=== Validation Issues ===")
+                        for issue in validation_issues:
+                            print(f"- {issue}")
+                        print("\nPlease fix these issues and try again.")
+                    
+                    # After adding a step, ask if they want to add another
+                    while True:
+                        continue_process = self.get_input("\nWould you like to add another step? (y/n)").lower()
+                        if continue_process == 'y':
+                            step_id = self.get_input("Enter a step ID:")
+                            new_step = self.create_missing_step(step_id)
+                            validation_issues = self.add_step(new_step, interactive=True)
+                            if validation_issues:
+                                print("\n=== Validation Issues ===")
+                                for issue in validation_issues:
+                                    print(f"- {issue}")
+                                print("\nPlease fix these issues and try again.")
+                        else:
+                            break
+                    # Always redisplay menu after adding steps
+                    show_menu()
+                elif choice == '4':
+                    break
+                else:
+                    print("Invalid choice. Please try again.")
+                    # Always redisplay menu after invalid choice
+                    show_menu()
             
-            # Use write_text if it's a Path object, otherwise use open()
-            if hasattr(prompt_file, 'write_text'):
-                prompt_file.write_text(llm_prompt)
-            else:
-                with open(prompt_file, 'w') as f:
-                    f.write(llm_prompt)
+            # Make sure we save state before generating outputs
+            self.save_state()
             
-            print(f"LLM prompt saved to: {prompt_file}")
+            # Check if we have steps before generating outputs
+            if not self.steps:
+                print("\nCannot generate outputs: Process builder has no steps.")
+                return
+                
+            # Generate outputs
+            self.generate_csv()
+            self.generate_mermaid_diagram()
+            
+            # Generate and save LLM prompt
+            llm_prompt = self.generate_llm_prompt()
+            print("\n=== LLM Prompt ===")
+            print(llm_prompt)
+            
+            if self.output_dir:
+                # Create Path object if self.output_dir is a string
+                output_dir = Path(self.output_dir) if isinstance(self.output_dir, str) else self.output_dir
+                prompt_file = output_dir / f"{self.process_name}_prompt.txt"
+                
+                # Use write_text if it's a Path object, otherwise use open()
+                if hasattr(prompt_file, 'write_text'):
+                    prompt_file.write_text(llm_prompt)
+                else:
+                    with open(prompt_file, 'w') as f:
+                        f.write(llm_prompt)
+                
+                print(f"LLM prompt saved to: {prompt_file}")
+            
+            # Generate and save executive summary
+            executive_summary = self.generate_executive_summary()
+            print("\n=== Executive Summary ===")
+            print(executive_summary)
+            
+            if self.output_dir:
+                # Create Path object if self.output_dir is a string
+                output_dir = Path(self.output_dir) if isinstance(self.output_dir, str) else self.output_dir
+                summary_file = output_dir / f"{self.process_name}_executive_summary.md"
+                
+                # Use write_text if it's a Path object, otherwise use open()
+                if hasattr(summary_file, 'write_text'):
+                    summary_file.write_text(executive_summary)
+                else:
+                    with open(summary_file, 'w') as f:
+                        f.write(executive_summary)
+                
+                print(f"Executive summary saved to: {summary_file}")
+                
+        except Exception as e:
+            print(f"An error occurred during interview: {str(e)}")
+            print(f"DEBUG: Builder exists: {hasattr(self, 'steps')}")
+            print(f"DEBUG: Builder type: {type(self)}")
+            print(f"DEBUG: Builder has 'steps' attribute: {hasattr(self, 'steps')}")
+            print(f"DEBUG: Error details: {e}")
+            print("Cannot generate outputs: Process builder has no steps or is in an invalid state.")
+
+    def save_state(self) -> None:
+        """Save the current process state to a JSON file.
         
-        # Generate and save executive summary
-        executive_summary = self.generate_executive_summary()
-        print("\n=== Executive Summary ===")
-        print(executive_summary)
+        This saves all steps, notes, and builder metadata to allow
+        resuming work on the process later.
+        """
+        try:
+            # Create state directory if it doesn't exist
+            self.state_dir.mkdir(exist_ok=True)
+            
+            # Create a state file for this process
+            state_file = self.state_dir / f"{self.process_name}.json"
+            
+            # Build the state dictionary
+            state = {
+                "process_name": self.process_name,
+                "timestamp": self.timestamp,
+                "current_note_id": self.current_note_id,
+                "step_count": self.step_count,
+                "steps": [step.to_dict() for step in self.steps],
+                "notes": [note.to_dict() for note in self.notes]
+            }
+            
+            # Write the state to file
+            with open(state_file, "w") as f:
+                json.dump(state, f, indent=2)
+                
+            log.debug(f"Saved process state to {state_file}")
+        except Exception as e:
+            log.warning(f"Failed to save process state: {str(e)}")
+    
+    def load_state(self) -> bool:
+        """Load process state from a JSON file.
         
-        if self.output_dir:
-            # Create Path object if self.output_dir is a string
-            output_dir = Path(self.output_dir) if isinstance(self.output_dir, str) else self.output_dir
-            summary_file = output_dir / f"{self.process_name}_executive_summary.md"
+        Returns:
+            True if state was loaded successfully, False otherwise.
+        """
+        # Check if state directory and file exist
+        state_file = self.state_dir / f"{self.process_name}.json"
+        if not state_file.exists():
+            log.debug(f"No state file found for process: {self.process_name}")
+            return False
             
-            # Use write_text if it's a Path object, otherwise use open()
-            if hasattr(summary_file, 'write_text'):
-                summary_file.write_text(executive_summary)
-            else:
-                with open(summary_file, 'w') as f:
-                    f.write(executive_summary)
+        try:
+            # Read the state from file
+            with open(state_file, "r") as f:
+                state = json.load(f)
+                
+            # Load metadata
+            self.timestamp = state.get("timestamp", self.timestamp)
+            self.current_note_id = state.get("current_note_id", 1)
+            self.step_count = state.get("step_count", 0)
             
-            print(f"Executive summary saved to: {summary_file}")
+            # Load steps
+            self.steps = []
+            for step_data in state.get("steps", []):
+                self.steps.append(ProcessStep.from_dict(step_data))
+                
+            # Load notes
+            self.notes = []
+            for note_data in state.get("notes", []):
+                self.notes.append(ProcessNote.from_dict(note_data))
+                
+            log.debug(f"Successfully loaded state for process: {self.process_name}")
+            return True
+        except Exception as e:
+            log.warning(f"Failed to load process state: {str(e)}")
+            return False
 
     def view_all_steps(self) -> None:
         """Display all steps with their flow connections."""
@@ -1537,92 +1693,34 @@ Please help me:
                         # Create new note
                         note_id = f"Note{self.current_note_id}"
                         self.notes.append(ProcessNote(note_id, new_note, step.step_id))
-                        step.note_id = note_id
                         self.current_note_id += 1
-                
-                new_validation = self.get_input(f"Validation Rules [{step.validation_rules or 'None'}]:")
-                if new_validation:
-                    step.validation_rules = new_validation
-                elif new_validation == '':
-                    step.validation_rules = None
-                
-                new_errors = self.get_input(f"Error Codes [{step.error_codes or 'None'}]:")
-                if new_errors:
-                    step.error_codes = new_errors
-                elif new_errors == '':
-                    step.error_codes = None
-            
-            # Next steps
-            new_next_success = self.get_input(f"Next Step (Success) [{step.next_step_success}]:")
-            if new_next_success:
-                step.next_step_success = new_next_success
-            
-            new_next_failure = self.get_input(f"Next Step (Failure) [{step.next_step_failure}]:")
-            if new_next_failure:
-                step.next_step_failure = new_next_failure
-            
-            # Validate the process flow after edits
+            # Final validation and save
+            step_issues = step.validate()
+            next_step_issues = self.validate_next_step(step)
             flow_issues = validate_process_flow(self.steps)
             note_issues = validate_notes(self.notes, self.steps)
-            
-            if flow_issues or note_issues:
+            all_issues = step_issues + next_step_issues + flow_issues + note_issues
+
+            if all_issues:
                 print("\n=== Validation Issues ===")
-                for issue in flow_issues + note_issues:
+                for issue in all_issues:
                     print(f"- {issue}")
                 print("\nPlease fix these issues.")
+                
+                save_anyway = self.get_input("Save changes anyway? (y/n)").lower() == 'y'
+                if save_anyway:
+                    print("\nSaving changes with validation issues...")
+                    self.save_state()
+                    print("Step updated and saved with validation issues.")
+                else:
+                    print("\nChanges not saved due to validation issues.")
+                    return
             else:
                 print("\nStep updated successfully.")
-                
-        except ValueError:
-            print("Invalid input. Please enter a number.")
+                self.save_state()
+                print("Step changes saved successfully.")
         except Exception as e:
             print(f"Error editing step: {str(e)}")
-
-    def generate_next_step_suggestion(self, step_id: str, description: str, decision: str, success_outcome: str, failure_outcome: str, is_success_path: bool) -> str:
-        """Generate a suggested next step name using OpenAI."""
-        if not self.openai_client:
-            return ""
-            
-        try:
-            # Build context string
-            context = f"Process: {self.process_name}\n"
-            context += f"Current Step: {step_id} - {description}\n"
-            context += f"Decision: {decision}\n"
-            context += f"Success Outcome: {success_outcome}\n"
-            context += f"Failure Outcome: {failure_outcome}\n"
-            context += f"Path Type: {'Success' if is_success_path else 'Failure'}\n"
-            
-            # Sanitize context to prevent syntax errors from unescaped single quotes
-            safe_context = sanitize_string(context)
-            
-            # Rewrite the prompt with proper string formatting
-            prompt = (
-                f"Based on the following process context:\n\n"
-                f"{safe_context}\n\n"
-                f"Please suggest a clear, descriptive name for the next step in this process. The step name should:\n"
-                f"1. Start with a verb\n"
-                f"2. Be clear and descriptive (2-5 words)\n"
-                f"3. Follow logically from the {'success' if is_success_path else 'failure'} outcome\n"
-                f"4. Be specific to the process flow\n"
-                f"5. Follow business process naming conventions\n\n"
-                f"Format the response as a single step name, or 'End' if this should be the final step."
-            )
-
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a process design expert. Create clear, descriptive step names that follow best practices."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=50
-            )
-            
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            print(f"Error generating next step suggestion: {str(e)}")
-            return ""
-
     def generate_step_note(self, step_id: str, description: str, decision: str, success_outcome: str, failure_outcome: str) -> str:
         """Generate a suggested note for a step using OpenAI."""
         if not self.openai_client:
