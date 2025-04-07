@@ -1,22 +1,80 @@
 """
 Main ProcessBuilder class for building and managing processes.
 """
+
 import os
 import sys
 import time
+import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Callable
 import openai
 from datetime import datetime
+import io
+from typing import List, Optional, Tuple, Dict, Any, Callable
+# Setup logger
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)  # Default log level
 
-from .models import ProcessStep, ProcessNote
+# Add a stream handler if none exists
+if not log.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    log.addHandler(handler)
+
+# Import local modules
 from .config import Config
+from .models import ProcessStep, ProcessNote
 from .utils import (
     sanitize_id,
     validate_process_flow,
     validate_notes,
     write_csv
 )
+def default_input_handler(prompt: str) -> str:
+    """Default input handler that uses the built-in input function.
+    This serves as a fallback when get_step_input from cli isn't available."""
+    while True:
+        response = input(f"\n{prompt}\n> ").strip()
+        if response:
+            return response
+
+# Function to sanitize strings to prevent issues with quotes
+def sanitize_string(text):
+    """Sanitize a string to prevent issues with quotes."""
+    if not text:
+        return text
+    return text.replace("'", "\\'")
+# Set log level based on verbose mode
+def set_log_level(verbose=False):
+    """Set the log level based on verbose mode."""
+    logger = logging.getLogger(__name__)
+    
+    # Set the appropriate log level based on verbose mode
+    # Make sure WARNING level is always visible regardless of verbose mode
+    logger_level = logging.DEBUG if verbose else logging.INFO
+    logger.setLevel(logger_level)
+    
+    # Ensure we have at least one handler
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    
+    # Update log level for all handlers
+    # Always set handlers to DEBUG level to ensure warnings are captured
+    # regardless of the logger's level
+    for handler in logger.handlers:
+        handler.setLevel(logging.DEBUG)
+    
+    # Log a message to confirm level change
+    logger.debug(f"Debug logging {'enabled' if verbose else 'disabled'}")
+    
+    # Log a message to verify warnings are working
+    logger.debug("Log levels properly configured")
+    
 
 def show_loading_animation(message: str, duration: float = 0.5) -> None:
     """Show a simple loading animation while waiting for AI response.
@@ -29,136 +87,245 @@ def show_loading_animation(message: str, duration: float = 0.5) -> None:
     start_time = time.time()
     
     try:
+        i = 0
         while True:
-            for frame in frames:
-                sys.stdout.write(f"\r{frame} {message}...")
-                sys.stdout.flush()
-                time.sleep(duration)
-                if time.time() - start_time > 5:  # Timeout after 5 seconds
-                    break
-            if time.time() - start_time > 5:
+            frame = frames[i % len(frames)]
+            sys.stdout.write(f"\r{message} {frame}")
+            sys.stdout.flush()
+            time.sleep(duration)
+            i += 1
+            
+            # Optional timeout to prevent infinite animation
+            elapsed = time.time() - start_time
+            if elapsed > 30:  # Safety timeout after 30 seconds
                 break
     except KeyboardInterrupt:
         pass
     finally:
-        sys.stdout.write("\r" + " " * (len(message) + 4) + "\r")  # Clear the line
+        sys.stdout.write("\r\033[K")  # Clear the line
         sys.stdout.flush()
-
 class ProcessBuilder:
-    """Main class for building processes through interactive interviews."""
+    """Main class for building and managing process flows."""
     
-    def __init__(self, process_name: str, config: Optional[Config] = None):
-        self.process_name = process_name
-        self.steps: List[ProcessStep] = []
-        self.notes: List[ProcessNote] = []
-        self.current_note_id = 1
-        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.output_dir: Optional[Path] = None
-        self.step_count = 0
+    # Class-level input handler (allows custom input methods to be injected)
+    _input_handler = default_input_handler
+    
+    # Initialize class variable for verbose mode
+    _verbose: bool = False
+    
+    def __init__(self, process_name, config=None, verbose=None):
+        """Initialize a new ProcessBuilder.
         
-        # Initialize configuration
+        Args:
+            process_name: The name of the process to build
+            config: Optional Config object, will create default if None
+            verbose: Optional boolean to override class-level verbose setting
+        """
+        self.process_name = process_name
         self.config = config or Config()
+        self.steps = []
+        self.notes = []
+        self.current_note_id = 1
+        self.output_dir = None
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.step_count = 0  # Initialize step counter
+        
+        # Set instance-level verbose mode if specified
+        self.verbose = verbose if verbose is not None else self.__class__._verbose
+        
+        # If verbose mode is specified at instance level and different from class level, update the class setting
+        if verbose is not None and verbose != self.__class__._verbose:
+            self.__class__.set_verbose_mode(verbose)
+            log.debug(f"Updated class verbose mode to {verbose}")
+        
+        # Log the initialization with verbose mode setting
+        log.debug(f"ProcessBuilder initialized with verbose={self.verbose}")
         
         # Initialize OpenAI client if API key is available
-        if self.config.has_openai:
-            try:
-                self.openai_client = openai.OpenAI(api_key=self.config.openai_api_key)
-                # Test the connection
-                self.openai_client.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    messages=[{"role": "user", "content": "test"}],
-                    max_tokens=1
-                )
-            except Exception as e:
-                print(f"Warning: Failed to initialize OpenAI client: {str(e)}")
-                print("AI evaluation features will be disabled.")
+        try:
+            if os.environ.get("OPENAI_API_KEY"):
+                self.openai_client = openai.OpenAI()
+                log.debug("OpenAI client initialized successfully")
+            else:
                 self.openai_client = None
-        else:
+                # Always use warning level for missing API key, regardless of verbose mode
+                log.warning("No OpenAI API key found. AI features will be disabled.")
+                log.debug("Warning about missing API key has been logged")
+        except Exception as e:
             self.openai_client = None
-            
-        # Generate suggested first step title
-        self.suggested_first_step = self.generate_first_step_title()
-
-    def generate_first_step_title(self) -> str:
-        """Generate an intelligent first step title based on the process name."""
-        if not self.openai_client:
-            return "Initial Step"
-            
-        try:
-            prompt = f"""Given the process name "{self.process_name}", suggest an appropriate title for the first step.
-The title should:
-1. Be clear and descriptive
-2. Start with a verb
-3. Be specific to the process
-4. Be concise (2-5 words)
-5. Follow business process naming conventions
-
-Please provide just the step title, no additional text."""
-
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a business process expert. Create clear, concise step titles that follow best practices."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=50
-            )
-            
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            print(f"Error generating first step title: {str(e)}")
-            return "Initial Step"
-
-    def generate_next_step_title(self) -> str:
-        """Generate an intelligent next step title based on the process context."""
-        if not self.openai_client:
-            return "Next Step"
-            
-        try:
-            # Get the last step for context
-            last_step = self.steps[-1] if self.steps else None
-            if not last_step:
-                return self.generate_first_step_title()
-                
-            prompt = f"""Given the process name "{self.process_name}" and the current step context:
-
-Last Step: {last_step.step_id}
-Step Description: {last_step.description}
-Decision: {last_step.decision}
-Success Outcome: {last_step.success_outcome}
-Failure Outcome: {last_step.failure_outcome}
-
-Suggest an appropriate title for the next step in this process. The title should:
-1. Be clear and descriptive
-2. Start with a verb
-3. Be specific to what would logically follow in this process
-4. Be concise (2-5 words)
-5. Follow business process naming conventions
-
-Please provide just the step title, no additional text."""
-
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a business process expert. Create clear, concise step titles that follow best practices."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=50
-            )
-            
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            print(f"Error generating next step title: {str(e)}")
-            return "Next Step"
-
-    def find_missing_steps(self) -> List[Tuple[str, str, str]]:
-        """Find steps that are referenced but don't exist yet.
+            # Always use warning level for errors, regardless of verbose mode
+            log.warning(f"Failed to initialize OpenAI client: {str(e)}")
+    @property
+    def suggested_first_step(self) -> str:
+        """Generate a suggested name for the first step when there are 0 steps in the process.
         
         Returns:
-            List of tuples containing (missing_step_id, predecessor_step_id, path_type)
-            where path_type is either 'success' or 'failure'
+            A verb-based, actionable step name or empty string if OpenAI is not available
+        """
+        if not self.openai_client or len(self.steps) > 0:
+            return ""
+            
+        try:
+            # Sanitize process name to prevent syntax errors from unescaped single quotes
+            safe_process_name = sanitize_string(self.process_name)
+            
+            prompt = (
+                f"I'm creating a business process called '{safe_process_name}'.\n\n"
+                f"Please suggest a name for the first step in this process. The step name should:\n"
+                f"1. Start with a strong action verb (e.g., Collect, Review, Analyze)\n"
+                f"2. Be clear and descriptive (2-5 words)\n"
+                f"3. Be specific to the '{safe_process_name}' process\n"
+                f"4. Follow business process naming conventions\n"
+                f"5. Be actionable and task-oriented\n\n"
+                f"Provide only the step name, nothing else."
+            )
+            
+            if self.verbose:
+                log.debug(f"Sending OpenAI prompt for first step suggestion: \n{prompt}")
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are a process design expert. Create clear, descriptive step names that follow best practices."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=50
+            )
+            
+            suggestion = response.choices[0].message.content.strip()
+            if self.verbose:
+                log.debug(f"Received OpenAI first step suggestion: '{suggestion}'")
+            words = suggestion.split()
+            if len(words) > 5:
+                suggestion = ' '.join(words[:5])
+                log.debug(f"Truncated suggestion to: '{suggestion}'")
+                
+            return suggestion
+        except Exception as e:
+            log.warning(f"Error generating first step suggestion: {str(e)}")
+    
+    @classmethod
+    def set_input_handler(cls, handler: Callable[[str], str]) -> None:
+        """Set the input handler for receiving user input.
+        
+        Args:
+            handler: A callable that takes a prompt string and returns user input
+                     Must accept a string parameter and return a string
+            
+        Returns:
+            None
+            
+        Raises:
+            TypeError: If the handler is not callable
+        """
+        # Validate that the handler is callable
+        if not callable(handler):
+            raise TypeError("Input handler must be callable")
+            
+        # Update class variable
+        cls._input_handler = handler
+        log.debug("Input handler updated")
+        
+    @classmethod
+    def set_verbose_mode(cls, verbose: bool) -> None:
+        """Set the verbose mode for detailed OpenAI response logging.
+        
+        Args:
+            verbose: If True, OpenAI response details will be logged at DEBUG level
+            
+        Returns:
+            None
+        """
+        # Store original verbose setting for comparison
+        old_verbose = cls._verbose
+        
+        # Update class variable
+        cls._verbose = verbose
+        
+        # Log the change (use debug if it's a repeat call with same value)
+        if old_verbose == verbose:
+            log.debug(f"Verbose mode remained {'enabled' if verbose else 'disabled'}")
+        else:
+            log.info(f"Verbose mode {'enabled' if verbose else 'disabled'}")
+        
+        # Always update log level to ensure consistency
+        set_log_level(verbose)
+    def get_input(self, prompt: str) -> str:
+        """Get input from the user with the configured input handler."""
+        return self.__class__._input_handler(prompt)
+    def generate_error_codes(self, step_id: str, description: str, decision: str, success_outcome: str, failure_outcome: str) -> str:
+        """Generate suggested error codes for a step using OpenAI."""
+        if not self.openai_client:
+            return ""
+        
+        try:
+            # Sanitize inputs
+            safe_process_name = sanitize_string(self.process_name)
+            safe_step_id = sanitize_string(step_id)
+            safe_description = sanitize_string(description)
+            safe_decision = sanitize_string(decision)
+            safe_success = sanitize_string(success_outcome)
+            safe_failure = sanitize_string(failure_outcome)
+            
+            # Build prompt context using string concatenation
+            context = (
+                f"Process: {safe_process_name}\n"
+                f"Step ID: {safe_step_id}\n"
+                f"Description: {safe_description}\n"
+                f"Decision: {safe_decision}\n"
+                f"Success Outcome: {safe_success}\n"
+                f"Failure Outcome: {safe_failure}\n\n"
+                "Please suggest error codes for this step that:\n"
+                "1. Are specific to potential failure scenarios\n"
+                "2. Follow a consistent naming convention\n"
+                "3. Include both technical and business error codes\n"
+                "4. Are descriptive and meaningful\n"
+                "5. Can be used for logging and monitoring\n\n"
+                "Format the response as a bulleted list of error codes with brief descriptions."
+            )
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are a process error handling expert. Provide clear, specific error codes for process steps."},
+                    {"role": "user", "content": context}
+                ],
+                temperature=0.7,
+                max_tokens=200
+            )
+            
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Error generating error codes suggestion: {str(e)}")
+            return ""
+    
+    def validate_next_step_id(self, next_step_id: str) -> bool:
+        """Validate that a next step ID is either 'End' or an existing step.
+        
+        Args:
+            next_step_id: The next step ID to validate
+            
+        Returns:
+            True if the next step is valid (either 'End' or an existing step ID),
+            False otherwise
+        """
+        # "End" is always a valid next step
+        if next_step_id.lower() == 'end':
+            return True
+            
+        # Check if the step ID exists in the current steps
+        if any(step.step_id == next_step_id for step in self.steps):
+            return True
+            
+        # Return False for any other value
+        return False
+        
+    def find_missing_steps(self) -> List[Tuple[str, str, str]]:
+        """Find steps that are referenced but not yet defined.
+        
+        Returns:
+            A list of tuples (missing_step_id, referencing_step_id, path_type),
+            where path_type is either 'success' or 'failure'.
         """
         missing_steps = []
         existing_step_ids = {step.step_id for step in self.steps}
@@ -195,19 +362,19 @@ Please provide just the step title, no additional text."""
         
         try:
             # Create a prompt to parse the suggestions
-            parse_prompt = f"""Parse the following process step suggestions into specific field updates:
-
-{suggestions}
-
-Please provide the updates in this exact format:
-Description: [new description or None]
-Decision: [new decision or None]
-Success Outcome: [new success outcome or None]
-Failure Outcome: [new failure outcome or None]
-Validation Rules: [new validation rules or None]
-Error Codes: [new error codes or None]
-
-If a field should not be updated, use None."""
+            # Rewrite the prompt with proper string formatting
+            parse_prompt = (
+                f"Parse the following process step suggestions into specific field updates:\n\n"
+                f"{suggestions}\n\n"
+                f"Please provide the updates in this exact format:\n"
+                f"Description: [new description or None]\n"
+                f"Decision: [new decision or None]\n"
+                f"Success Outcome: [new success outcome or None]\n"
+                f"Failure Outcome: [new failure outcome or None]\n"
+                f"Validation Rules: [new validation rules or None]\n"
+                f"Error Codes: [new error codes or None]\n\n"
+                f"If a field should not be updated, use None."
+            )
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
@@ -260,18 +427,18 @@ If a field should not be updated, use None."""
                     if path_type:
                         context += f"Path Type: {path_type}\n"
             
-            prompt = f"""Given the following process context:
-
-{context}
-
-Suggest a clear and concise description of what happens in this step. The description should:
-1. Be specific and actionable
-2. Include key activities and inputs
-3. Explain the purpose of the step
-4. Be between 50-100 words
-5. Follow business process documentation best practices
-
-Please provide just the description, no additional text."""
+            # Rewrite the prompt with proper string formatting
+            prompt = (
+                f"Given the following process context:\n\n"
+                f"{context}\n\n"
+                f"Suggest a clear and concise description of what happens in this step. The description should:\n"
+                f"1. Be specific and actionable\n"
+                f"2. Include key activities and inputs\n"
+                f"3. Explain the purpose of the step\n"
+                f"4. Be between 50-100 words\n"
+                f"5. Follow business process documentation best practices\n\n"
+                f"Please provide just the description, no additional text."
+            )
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
@@ -328,17 +495,20 @@ Please provide just the description, no additional text."""
                     if path_type:
                         context += f"Path Type: {path_type}\n"
             
-            prompt = f"""Based on the following process context:
-
-{context}
-
-Please suggest a clear, specific decision point for this step. The decision should:
-1. Be a yes/no question
-2. Be directly related to the step's purpose
-3. Be specific and actionable
-4. Help determine the next step in the process
-
-Return only the decision question, without any additional explanation or formatting."""
+            # Sanitize context to prevent syntax errors from unescaped single quotes
+            safe_context = sanitize_string(context)
+            
+            # Rewrite the prompt with proper string formatting
+            prompt = (
+                f"Based on the following process context:\n\n"
+                f"{safe_context}\n\n"
+                f"Please suggest a clear, specific decision point for this step. The decision should:\n"
+                f"1. Be a yes/no question\n"
+                f"2. Be directly related to the step's purpose\n"
+                f"3. Be specific and actionable\n"
+                f"4. Help determine the next step in the process\n\n"
+                f"Return only the decision question, without any additional explanation or formatting."
+            )
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
@@ -373,17 +543,20 @@ Return only the decision question, without any additional explanation or formatt
                     if path_type:
                         context += f"Path Type: {path_type}\n"
             
-            prompt = f"""Based on the following process context:
-
-{context}
-
-Please suggest a clear, specific success outcome for this step. The success outcome should:
-1. Be a clear yes/no question
-2. Directly relate to the step's purpose
-3. Be specific and actionable
-4. Help determine the next step
-
-Format the response as a single question that can be answered with yes/no."""
+            # Sanitize context to prevent syntax errors from unescaped single quotes
+            safe_context = sanitize_string(context)
+            
+            # Rewrite the prompt with proper string formatting
+            prompt = (
+                f"Based on the following process context:\n\n"
+                f"{safe_context}\n\n"
+                f"Please suggest a clear, specific success outcome for this step. The success outcome should:\n"
+                f"1. Be a clear yes/no question\n"
+                f"2. Directly relate to the step's purpose\n"
+                f"3. Be specific and actionable\n"
+                f"4. Help determine the next step\n\n"
+                f"Format the response as a single question that can be answered with yes/no."
+            )
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
@@ -418,17 +591,20 @@ Format the response as a single question that can be answered with yes/no."""
                     if path_type:
                         context += f"Path Type: {path_type}\n"
             
-            prompt = f"""Based on the following process context:
-
-{context}
-
-Please suggest a clear, specific failure outcome for this step. The failure outcome should:
-1. Clearly describe what happens when the step fails
-2. Be specific about error handling or recovery steps
-3. Help determine the next step in the failure path
-4. Be actionable and informative
-
-Format the response as a clear, concise statement describing the failure outcome."""
+            # Sanitize context to prevent syntax errors from unescaped single quotes
+            safe_context = sanitize_string(context)
+            
+            # Rewrite the prompt with proper string formatting
+            prompt = (
+                f"Based on the following process context:\n\n"
+                f"{safe_context}\n\n"
+                f"Please suggest a clear, specific failure outcome for this step. The failure outcome should:\n"
+                f"1. Clearly describe what happens when the step fails\n"
+                f"2. Be specific about error handling or recovery steps\n"
+                f"3. Help determine the next step in the failure path\n"
+                f"4. Be actionable and informative\n\n"
+                f"Format the response as a clear, concise statement describing the failure outcome."
+            )
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
@@ -445,6 +621,43 @@ Format the response as a clear, concise statement describing the failure outcome
             print(f"Error generating failure outcome suggestion: {str(e)}")
             return ""
 
+    def create_missing_step_noninteractive(self, step_id: str, predecessor_id: Optional[str] = None, path_type: Optional[str] = None) -> ProcessStep:
+        """Create a missing step with default values without requiring user input.
+        
+        Args:
+            step_id: ID of the step to create
+            predecessor_id: Optional ID of the step that references this one
+            path_type: Optional path type ('success' or 'failure')
+            
+        Returns:
+            A new ProcessStep with default values
+        """
+        print(f"\nFound missing step: {step_id}")
+        if predecessor_id:
+            print(f"Referenced by step: {predecessor_id} on {path_type} path")
+        
+        # Create default values
+        description = f"Automatically generated step for: {step_id}"
+        decision = f"Does the {step_id} step complete successfully?"
+        success_outcome = "The step completed successfully."
+        failure_outcome = "The step failed to complete."
+        
+        # Create and return the step with default values
+        step = ProcessStep(
+            step_id=step_id,
+            description=description,
+            decision=decision,
+            success_outcome=success_outcome,
+            failure_outcome=failure_outcome,
+            note_id=None,
+            next_step_success="End",  # Default to End, will be updated later
+            next_step_failure="End",  # Default to End, will be updated later
+            validation_rules=None,
+            error_codes=None
+        )
+        
+        return step
+
     def create_missing_step(self, step_id: str, predecessor_id: Optional[str] = None, path_type: Optional[str] = None) -> ProcessStep:
         """Create a missing step that was referenced by another step."""
         print(f"\nCreating missing step: {step_id}")
@@ -452,23 +665,24 @@ Format the response as a clear, concise statement describing the failure outcome
         # Initial AI confirmation
         use_ai = False
         if self.openai_client:
-            use_ai = input("\nWould you like to use AI suggestions for this step? (y/n)\n> ").lower() == 'y'
+            use_ai = self.get_input("\nWould you like to use AI suggestions for this step? (y/n)").lower() == 'y'
             if use_ai:
                 print("\nI'll ask for your input first, then offer AI suggestions if you'd like.")
         
         # Get step description
         print("\nThe step name is used as a label in the process diagram.")
-        description = input("What happens in this step?\n> ").strip()
+        description = self.get_input("What happens in this step?")
         
         if use_ai and self.openai_client:
-            want_ai_help = input("\nWould you like to see an AI suggestion for the description? (y/n)\n> ").lower() == 'y'
+            want_ai_help = self.get_input("\nWould you like to see an AI suggestion for the description? (y/n)").lower() == 'y'
             if want_ai_help:
                 try:
                     show_loading_animation("Generating step description")
                     suggested_description = self.generate_step_description(step_id, predecessor_id, path_type)
                     if suggested_description:
-                        print(f"\nAI suggests the following description: '{suggested_description}'")
-                        use_suggested = input("Use this suggestion? (y/n)\n> ").lower()
+                        safe_description = sanitize_string(suggested_description)
+                        print(f"\nAI suggests the following description: '{safe_description}'")
+                        use_suggested = self.get_input("Use this suggestion? (y/n)").lower()
                         if use_suggested == 'y':
                             description = suggested_description
                 except Exception as e:
@@ -476,17 +690,18 @@ Format the response as a clear, concise statement describing the failure outcome
         
         # Get decision
         print("\nThe decision is a yes/no question that determines which path to take next.")
-        decision = input("What decision needs to be made?\n> ").strip()
+        decision = self.get_input("What decision needs to be made?")
         
         if use_ai and self.openai_client:
-            want_ai_help = input("\nWould you like to see an AI suggestion for the decision? (y/n)\n> ").lower() == 'y'
+            want_ai_help = self.get_input("\nWould you like to see an AI suggestion for the decision? (y/n)").lower() == 'y'
             if want_ai_help:
                 try:
                     show_loading_animation("Generating decision suggestion")
                     suggested_decision = self.generate_step_decision(step_id, description, predecessor_id, path_type)
                     if suggested_decision:
-                        print(f"\nAI suggests the following decision: '{suggested_decision}'")
-                        use_suggested = input("Use this suggestion? (y/n)\n> ").lower()
+                        safe_decision = sanitize_string(suggested_decision)
+                        print(f"\nAI suggests the following decision: '{safe_decision}'")
+                        use_suggested = self.get_input("Use this suggestion? (y/n)").lower()
                         if use_suggested == 'y':
                             decision = suggested_decision
                 except Exception as e:
@@ -494,17 +709,18 @@ Format the response as a clear, concise statement describing the failure outcome
         
         # Get success outcome
         print("\nThe success outcome tells you which step to go to next when the decision is 'yes'.")
-        success_outcome = input("What happens if this step succeeds?\n> ").strip()
+        success_outcome = self.get_input("What happens if this step succeeds?")
         
         if use_ai and self.openai_client:
-            want_ai_help = input("\nWould you like to see an AI suggestion for the success outcome? (y/n)\n> ").lower() == 'y'
+            want_ai_help = self.get_input("\nWould you like to see an AI suggestion for the success outcome? (y/n)").lower() == 'y'
             if want_ai_help:
                 try:
                     show_loading_animation("Generating success outcome suggestion")
                     suggested_success = self.generate_step_success_outcome(step_id, description, decision, predecessor_id, path_type)
                     if suggested_success:
-                        print(f"\nAI suggests the following success outcome: '{suggested_success}'")
-                        use_suggested = input("Use this suggestion? (y/n)\n> ").lower()
+                        safe_success = sanitize_string(suggested_success)
+                        print(f"\nAI suggests the following success outcome: '{safe_success}'")
+                        use_suggested = self.get_input("Use this suggestion? (y/n)").lower()
                         if use_suggested == 'y':
                             success_outcome = suggested_success
                 except Exception as e:
@@ -512,17 +728,18 @@ Format the response as a clear, concise statement describing the failure outcome
         
         # Get failure outcome
         print("\nThe failure outcome tells you which step to go to next when the decision is 'no'.")
-        failure_outcome = input("What happens if this step fails?\n> ").strip()
+        failure_outcome = self.get_input("What happens if this step fails?")
         
         if use_ai and self.openai_client:
-            want_ai_help = input("\nWould you like to see an AI suggestion for the failure outcome? (y/n)\n> ").lower() == 'y'
+            want_ai_help = self.get_input("\nWould you like to see an AI suggestion for the failure outcome? (y/n)").lower() == 'y'
             if want_ai_help:
                 try:
                     show_loading_animation("Generating failure outcome suggestion")
                     suggested_failure = self.generate_step_failure_outcome(step_id, description, decision, predecessor_id, path_type)
                     if suggested_failure:
-                        print(f"\nAI suggests the following failure outcome: '{suggested_failure}'")
-                        use_suggested = input("Use this suggestion? (y/n)\n> ").lower()
+                        safe_failure = sanitize_string(suggested_failure)
+                        print(f"\nAI suggests the following failure outcome: '{safe_failure}'")
+                        use_suggested = self.get_input("Use this suggestion? (y/n)").lower()
                         if use_suggested == 'y':
                             failure_outcome = suggested_failure
                 except Exception as e:
@@ -530,20 +747,21 @@ Format the response as a clear, concise statement describing the failure outcome
         
         # Optional note
         print("\nA note is a brief comment that appears next to the step in the diagram.")
-        add_note = input("Would you like to add a note for this step? (y/n)\n> ").lower()
+        add_note = self.get_input("Would you like to add a note for this step? (y/n)").lower()
         note_id = None
         if add_note == 'y':
-            note_content = input("What's the note content?\n> ").strip()
+            note_content = self.get_input("What's the note content?")
             
             if use_ai and self.openai_client:
-                want_ai_help = input("\nWould you like to see an AI suggestion for the note? (y/n)\n> ").lower() == 'y'
+                want_ai_help = self.get_input("\nWould you like to see an AI suggestion for the note? (y/n)").lower() == 'y'
                 if want_ai_help:
                     try:
                         show_loading_animation("Generating note suggestion")
                         suggested_note = self.generate_step_note(step_id, description, decision, success_outcome, failure_outcome)
                         if suggested_note:
-                            print(f"\nAI suggests the following note: '{suggested_note}'")
-                            use_suggested = input("Use this suggestion? (y/n)\n> ").lower()
+                            safe_note = sanitize_string(suggested_note)
+                            print(f"\nAI suggests the following note: '{safe_note}'")
+                            use_suggested = self.get_input("Use this suggestion? (y/n)").lower()
                             if use_suggested == 'y':
                                 note_content = suggested_note
                     except Exception as e:
@@ -555,40 +773,43 @@ Format the response as a clear, concise statement describing the failure outcome
         
         # Enhanced fields
         print("\nValidation rules help ensure the step receives good input data.")
-        add_validation = input("Would you like to add validation rules? (y/n)\n> ").lower()
+        add_validation = self.get_input("Would you like to add validation rules? (y/n)").lower()
         validation_rules = None
         if add_validation == 'y':
-            validation_rules = input("Enter validation rules:\n> ").strip() or None
+            validation_rules = self.get_input("Enter validation rules:") or None
             
             if use_ai and self.openai_client:
-                want_ai_help = input("\nWould you like to see an AI suggestion for the validation rules? (y/n)\n> ").lower() == 'y'
+                want_ai_help = self.get_input("\nWould you like to see an AI suggestion for the validation rules? (y/n)").lower() == 'y'
                 if want_ai_help:
                     try:
                         show_loading_animation("Generating validation rules suggestion")
                         suggested_validation = self.generate_validation_rules(step_id, description, decision, success_outcome, failure_outcome)
                         if suggested_validation:
                             print(f"\nAI suggests the following validation rules:\n{suggested_validation}")
-                            use_suggested = input("Use this suggestion? (y/n)\n> ").lower()
+                            safe_validation = sanitize_string(suggested_validation)
+                            print(f"\nAI suggests the following validation rules:\n{safe_validation}")
+                            use_suggested = self.get_input("Use this suggestion? (y/n)").lower()
                             if use_suggested == 'y':
                                 validation_rules = suggested_validation
                     except Exception as e:
                         print(f"Error generating validation rules suggestion: {str(e)}")
         
         print("\nError codes help identify and track specific problems that might occur.")
-        add_error_codes = input("Would you like to add error codes? (y/n)\n> ").lower()
+        add_error_codes = self.get_input("Would you like to add error codes? (y/n)").lower()
         error_codes = None
         if add_error_codes == 'y':
-            error_codes = input("Enter error codes:\n> ").strip() or None
+            error_codes = self.get_input("Enter error codes:") or None
             
             if use_ai and self.openai_client:
-                want_ai_help = input("\nWould you like to see an AI suggestion for the error codes? (y/n)\n> ").lower() == 'y'
+                want_ai_help = self.get_input("\nWould you like to see an AI suggestion for the error codes? (y/n)").lower() == 'y'
                 if want_ai_help:
                     try:
                         show_loading_animation("Generating error codes suggestion")
                         suggested_error_codes = self.generate_error_codes(step_id, description, decision, success_outcome, failure_outcome)
                         if suggested_error_codes:
-                            print(f"\nAI suggests the following error codes:\n{suggested_error_codes}")
-                            use_suggested = input("Use this suggestion? (y/n)\n> ").lower()
+                            safe_error_codes = sanitize_string(suggested_error_codes)
+                            print(f"\nAI suggests the following error codes:\n{safe_error_codes}")
+                            use_suggested = self.get_input("Use this suggestion? (y/n)").lower()
                             if use_suggested == 'y':
                                 error_codes = suggested_error_codes
                     except Exception as e:
@@ -627,23 +848,32 @@ Format the response as a clear, concise statement describing the failure outcome
             if not predecessor:
                 return step_id
                 
-            prompt = f"""Given the following process context:
-Process Name: {self.process_name}
-Predecessor Step: {predecessor.step_id}
-Predecessor Description: {predecessor.description}
-Predecessor Decision: {predecessor.decision}
-Path Type: {path_type}
-Current Step ID: {step_id}
-
-Suggest an appropriate title for this step that:
-1. Follows logically from the predecessor step
-2. Is clear and descriptive
-3. Starts with a verb
-4. Is specific to the process
-5. Is concise (2-5 words)
-6. Follows business process naming conventions
-
-Please provide just the step title, no additional text."""
+            # Sanitize strings to prevent syntax errors from unescaped single quotes
+            safe_process_name = sanitize_string(self.process_name)
+            safe_pred_id = sanitize_string(predecessor.step_id)
+            safe_pred_desc = sanitize_string(predecessor.description)
+            safe_pred_decision = sanitize_string(predecessor.decision)
+            safe_path_type = sanitize_string(path_type)
+            safe_step_id = sanitize_string(step_id)
+            
+            # Rewrite the prompt with proper string formatting
+            prompt = (
+                f"Given the following process context:\n"
+                f"Process Name: {safe_process_name}\n"
+                f"Predecessor Step: {safe_pred_id}\n"
+                f"Predecessor Description: {safe_pred_desc}\n"
+                f"Predecessor Decision: {safe_pred_decision}\n"
+                f"Path Type: {safe_path_type}\n"
+                f"Current Step ID: {safe_step_id}\n\n"
+                f"Suggest an appropriate title for this step that:\n"
+                f"1. Follows logically from the predecessor step\n"
+                f"2. Is clear and descriptive\n"
+                f"3. Starts with a verb\n"
+                f"4. Is specific to the process\n"
+                f"5. Is concise (2-5 words)\n"
+                f"6. Follows business process naming conventions\n\n"
+                f"Please provide just the step title, no additional text."
+            )
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
@@ -660,8 +890,14 @@ Please provide just the step title, no additional text."""
             print(f"Error generating step title: {str(e)}")
             return step_id
 
-    def add_step(self, step: ProcessStep) -> List[str]:
-        """Add a new step to the process and validate it."""
+    def add_step(self, step: ProcessStep, interactive: bool = True) -> List[str]:
+        """Add a new step to the process and validate it.
+        
+        Args:
+            step: The ProcessStep to add
+            interactive: Whether to use interactive mode for missing steps
+                         If False, will auto-generate missing steps without prompts
+        """
         # Validate the step
         issues = step.validate()
         if issues:
@@ -683,11 +919,16 @@ Please provide just the step title, no additional text."""
                 break
                 
             for missing_step_id, predecessor_id, path_type in missing_steps:
-                print(f"\nFound missing step: {missing_step_id}")
-                print(f"Referenced by step: {predecessor_id} on {path_type} path")
+                # Create the missing step using either interactive or non-interactive mode
+                if interactive:
+                    print(f"\nFound missing step: {missing_step_id}")
+                    print(f"Referenced by step: {predecessor_id} on {path_type} path")
+                    new_step = self.create_missing_step(missing_step_id, predecessor_id, path_type)
+                else:
+                    new_step = self.create_missing_step_noninteractive(missing_step_id, predecessor_id, path_type)
                 
-                new_step = self.create_missing_step(missing_step_id, predecessor_id, path_type)
-                step_issues = self.add_step(new_step)
+                # Add the new step with the same interactivity setting
+                step_issues = self.add_step(new_step, interactive=interactive)
                 
                 if step_issues:
                     print("\n=== Validation Issues ===")
@@ -736,26 +977,26 @@ Please provide just the step title, no additional text."""
             return "AI evaluation is not available - OPENAI_API_KEY not found or invalid."
             
         try:
-            prompt = f"""Evaluate the following process step design:
-
-Process Name: {self.process_name}
-Step ID: {step.step_id}
-Description: {step.description}
-Decision: {step.decision}
-Success Outcome: {step.success_outcome}
-Failure Outcome: {step.failure_outcome}
-Next Step (Success): {step.next_step_success}
-Next Step (Failure): {step.next_step_failure}
-Validation Rules: {step.validation_rules or 'None'}
-Error Codes: {step.error_codes or 'None'}
-
-Please provide:
-1. A brief assessment of the step's design
-2. Potential improvements or considerations
-3. Any missing elements that should be addressed
-4. Specific recommendations for validation or error handling if not provided
-
-Keep the response concise and actionable."""
+            # Rewrite the prompt with proper string formatting
+            prompt = (
+                f"Evaluate the following process step design:\n\n"
+                f"Process Name: {self.process_name}\n"
+                f"Step ID: {step.step_id}\n"
+                f"Description: {step.description}\n"
+                f"Decision: {step.decision}\n"
+                f"Success Outcome: {step.success_outcome}\n"
+                f"Failure Outcome: {step.failure_outcome}\n"
+                f"Next Step (Success): {step.next_step_success}\n"
+                f"Next Step (Failure): {step.next_step_failure}\n"
+                f"Validation Rules: {step.validation_rules or 'None'}\n"
+                f"Error Codes: {step.error_codes or 'None'}\n\n"
+                f"Please provide:\n"
+                f"1. A brief assessment of the step's design\n"
+                f"2. Potential improvements or considerations\n"
+                f"3. Any missing elements that should be addressed\n"
+                f"4. Specific recommendations for validation or error handling if not provided\n\n"
+                f"Keep the response concise and actionable."
+            )
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
@@ -865,7 +1106,8 @@ Keep the response concise and actionable."""
                         diagram += f"    {decision_id} -->|Yes| {future_id}\n"
                 else:
                     end_id = "ProcessEnd"
-                    diagram += f"    {end_id}[\"Process End\"]\n"
+                    if "ProcessEnd" not in diagram:
+                        diagram += f"    {end_id}[\"Process End\"]\n"
                     diagram += f"    {decision_id} -->|Yes| {end_id}\n"
                 
                 # Add failure path
@@ -884,24 +1126,26 @@ Keep the response concise and actionable."""
                         diagram += f"    {end_id}[\"Process End\"]\n"
                     diagram += f"    {decision_id} -->|No| {end_id}\n"
             
-            # Add note if present
+            # Add note if present, with error handling for missing notes
             if step.note_id:
-                note = next(n for n in self.notes if n.note_id == step.note_id)
-                note_id = f"Note_{sanitize_id(step.step_id)}"
-                diagram += f"    {note_id}[\"{note.content}\"]\n"
-                diagram += f"    {safe_id} -.-> {note_id}\n"
-        
-        # Add styling
+                try:
+                    note = next(n for n in self.notes if n.note_id == step.note_id)
+                    note_id = f"Note_{sanitize_id(step.step_id)}"
+                    diagram += f"    {note_id}[\"{note.content}\"]\n"
+                    diagram += f"    {safe_id} -.-> {note_id}\n"
+                except StopIteration:
+                    # Note referenced by step wasn't found, log a warning and continue
+                    log.warning(f"Note {step.note_id} referenced by step {step.step_id} not found")
         diagram += """
     classDef process fill:#E8F5E9,stroke:#66BB6A
     classDef decision fill:#FFF3E0,stroke:#FFB74D
     classDef note fill:#FFFDE7,stroke:#FFF9C4
     classDef end fill:#FFEBEE,stroke:#E57373
     
-    class Step* process
-    class Decision* decision
-    class Note* note
-    class End end
+    class Step_* process
+    class Decision_* decision
+    class Note_* note
+    class ProcessEnd end
 ```"""
         
         # Save to file
@@ -911,12 +1155,11 @@ Keep the response concise and actionable."""
 
     def generate_llm_prompt(self) -> str:
         """Generate a prompt for an LLM to help document the process."""
-        prompt = f"""I need help documenting the {self.process_name} process. Here's what I know so far:
-
-Process Overview:
-{self.process_name} is a workflow that handles the following steps:
-
-"""
+        prompt = (
+            f"I need help documenting the {self.process_name} process. Here's what I know so far:\n\n"
+            f"Process Overview:\n"
+            f"{self.process_name} is a workflow that handles the following steps:\n\n"
+        )
         
         for step in self.steps:
             prompt += f"""
@@ -926,66 +1169,63 @@ Step {step.step_id}: {step.description}
 - Failure: {step.failure_outcome}
 """
             if step.note_id:
-                note = next(n for n in self.notes if n.note_id == step.note_id)
-                prompt += f"- Note: {note.content}\n"
-            
-            if step.validation_rules:
-                prompt += f"- Validation: {step.validation_rules}\n"
-            if step.error_codes:
-                prompt += f"- Error Codes: {step.error_codes}\n"
+                try:
+                    note = next(n for n in self.notes if n.note_id == step.note_id)
+                    prompt += f"\n- Note: {note.content}"
+                except StopIteration:
+                    log.warning(f"Note {step.note_id} referenced by step {step.step_id} not found")
+                    prompt += f"\n- Note: [Referenced note {step.note_id} not found]"
+                
+                # Add validation rules if they exist
+                if step.validation_rules:
+                    prompt += f"\n- Validation: {step.validation_rules}"
+                # Add error codes if they exist
+                if step.error_codes:
+                    prompt += f"\n- Error Codes: {step.error_codes}"
         
         prompt += """
+
 Please help me:
 1. Review this process for completeness
 2. Identify any missing steps or edge cases
 3. Suggest improvements to the workflow
 4. Create a clear, visual representation of the process
 """
-        
-        return prompt 
+        return prompt
 
     def generate_executive_summary(self) -> str:
-        """Generate an executive summary of the process."""
+        """Generate an executive summary for the process using OpenAI."""
         if not self.openai_client:
-            return "AI features are not available - OPENAI_API_KEY not found or invalid."
+            return "AI executive summary is not available - OPENAI_API_KEY not found or invalid."
             
         try:
             # Create a detailed prompt for the executive summary
-            prompt = f"""Create an executive summary for the {self.process_name} process. Here's the process information:
-
-Process Steps:
-"""
+            # Create a detailed prompt for the executive summary
+            # Rewrite the prompt with proper string formatting
+            prompt = (
+                f"Create an executive summary for the {self.process_name} process. Here's the process information:\n\n"
+                f"Process Steps:\n"
+            )
             
             for step in self.steps:
-                prompt += f"""
-Step {step.step_id}: {step.description}
-- Decision: {step.decision}
-- Success: {step.success_outcome}
-- Failure: {step.failure_outcome}
-"""
-                if step.note_id:
-                    note = next(n for n in self.notes if n.note_id == step.note_id)
-                    prompt += f"- Note: {note.content}\n"
+                prompt += (
+                    f"Step {step.step_id}: {step.description}\n"
+                    f"- Decision: {step.decision}\n"
+                    f"- Success: {step.success_outcome}\n"
+                    f"- Failure: {step.failure_outcome}\n"
+                )
                 
-                if step.validation_rules:
-                    prompt += f"- Validation: {step.validation_rules}\n"
-                if step.error_codes:
-                    prompt += f"- Error Codes: {step.error_codes}\n"
-            
-            prompt += """
-Please create an executive summary that includes:
-1. Process Overview
-2. Key Steps and Decision Points
-3. Success and Failure Paths
-4. Risk Mitigation Strategies
-5. Implementation Considerations
-6. Expected Outcomes
-
-Format the response in clear sections with appropriate headers.
-"""
+                if step.note_id:
+                    try:
+                        note = next(n for n in self.notes if n.note_id == step.note_id)
+                        prompt += f"\n- Note: {note.content}"
+                    except StopIteration:
+                        log.warning(f"Note {step.note_id} referenced by step {step.step_id} not found")
+                        prompt += f"\n- Note: [Referenced note {step.note_id} not found]"
+            if self.verbose:
+                log.debug(f"Sending OpenAI prompt for executive summary: \n{prompt}")
             
             response = self.openai_client.chat.completions.create(
-                model="gpt-4-turbo-preview",
                 messages=[
                     {"role": "system", "content": "You are a process documentation expert. Create clear, concise executive summaries for business processes."},
                     {"role": "user", "content": prompt}
@@ -994,11 +1234,15 @@ Format the response in clear sections with appropriate headers.
                 max_tokens=1000
             )
             
-            return response.choices[0].message.content.strip()
+            summary = response.choices[0].message.content.strip()
+            if self.verbose:
+                log.debug(f"Received OpenAI executive summary response")
+            
+            return summary
             
         except Exception as e:
+            log.error(f"Error generating executive summary: {str(e)}")
             return f"Error generating executive summary: {str(e)}"
-
     def run_interview(self) -> None:
         """Run the interactive interview process."""
         print(f"\n=== Process Builder: {self.process_name} ===\n")
@@ -1016,7 +1260,7 @@ Format the response in clear sections with appropriate headers.
         show_menu()
         
         while True:
-            choice = input("Enter your choice (1-4): ").strip()
+            choice = self.get_input("Enter your choice (1-4):")
             
             if choice == '1':
                 self.view_all_steps()
@@ -1030,7 +1274,7 @@ Format the response in clear sections with appropriate headers.
                 self.add_step()
                 # After adding a step, ask if they want to add another
                 while True:
-                    continue_process = input("\nAdd another step? (y/n)\n> ").lower()
+                    continue_process = self.get_input("\nWould you like to add another step? (y/n)").lower()
                     if continue_process == 'y':
                         self.add_step()
                     else:
@@ -1120,8 +1364,12 @@ Format the response in clear sections with appropriate headers.
             print(f"  - {step.next_step_failure} (Failure)")
             
             if step.note_id:
-                note = next(n for n in self.notes if n.note_id == step.note_id)
-                print(f"\nNote: {note.content}")
+                try:
+                    note = next(n for n in self.notes if n.note_id == step.note_id)
+                    print(f"\nNote: {note.content}")
+                except StopIteration:
+                    log.warning(f"Note {step.note_id} referenced by step {step.step_id} not found")
+                    print(f"\nNote: [Referenced note {step.note_id} not found]")
             if step.validation_rules:
                 print(f"Validation Rules: {step.validation_rules}")
             if step.error_codes:
@@ -1140,7 +1388,7 @@ Format the response in clear sections with appropriate headers.
             print(f"{i}. {step.step_id}")
         
         try:
-            choice = int(input("\nEnter step number to edit: ").strip())
+            choice = int(self.get_input("Enter step number to edit:"))
             if choice < 1 or choice > len(self.steps):
                 print("Invalid step number.")
                 return
@@ -1166,51 +1414,51 @@ Format the response in clear sections with appropriate headers.
                 # Description
                 if description_suggestion:
                     print(f"\nAI suggests description: '{description_suggestion}'")
-                    use_suggestion = input("Use this suggestion? (y/n): ").lower() == 'y'
+                    use_suggestion = self.get_input("Use this suggestion? (y/n)").lower() == 'y'
                     if use_suggestion:
                         step.description = description_suggestion
                     else:
-                        new_desc = input(f"Description [{step.description}]: ").strip()
+                        new_desc = self.get_input(f"Description [{step.description}]:")
                         if new_desc:
                             step.description = new_desc
                 
                 # Decision
                 if decision_suggestion:
                     print(f"\nAI suggests decision: '{decision_suggestion}'")
-                    use_suggestion = input("Use this suggestion? (y/n): ").lower() == 'y'
+                    use_suggestion = self.get_input("Use this suggestion? (y/n)").lower() == 'y'
                     if use_suggestion:
                         step.decision = decision_suggestion
                     else:
-                        new_decision = input(f"Decision [{step.decision}]: ").strip()
+                        new_decision = self.get_input(f"Decision [{step.decision}]:")
                         if new_decision:
                             step.decision = new_decision
                 
                 # Success Outcome
                 if success_suggestion:
                     print(f"\nAI suggests success outcome: '{success_suggestion}'")
-                    use_suggestion = input("Use this suggestion? (y/n): ").lower() == 'y'
+                    use_suggestion = self.get_input("Use this suggestion? (y/n)").lower() == 'y'
                     if use_suggestion:
                         step.success_outcome = success_suggestion
                     else:
-                        new_success = input(f"Success Outcome [{step.success_outcome}]: ").strip()
+                        new_success = self.get_input(f"Success Outcome [{step.success_outcome}]:")
                         if new_success:
                             step.success_outcome = new_success
                 
                 # Failure Outcome
                 if failure_suggestion:
                     print(f"\nAI suggests failure outcome: '{failure_suggestion}'")
-                    use_suggestion = input("Use this suggestion? (y/n): ").lower() == 'y'
+                    use_suggestion = self.get_input("Use this suggestion? (y/n)").lower() == 'y'
                     if use_suggestion:
                         step.failure_outcome = failure_suggestion
                     else:
-                        new_failure = input(f"Failure Outcome [{step.failure_outcome}]: ").strip()
+                        new_failure = self.get_input(f"Failure Outcome [{step.failure_outcome}]:")
                         if new_failure:
                             step.failure_outcome = new_failure
                 
                 # Note
                 if note_suggestion:
                     print(f"\nAI suggests note: '{note_suggestion}'")
-                    use_suggestion = input("Use this suggestion? (y/n): ").lower() == 'y'
+                    use_suggestion = self.get_input("Use this suggestion? (y/n)").lower() == 'y'
                     if use_suggestion:
                         if step.note_id:
                             # Update existing note
@@ -1223,7 +1471,7 @@ Format the response in clear sections with appropriate headers.
                             step.note_id = note_id
                             self.current_note_id += 1
                     else:
-                        new_note = input(f"Note [{'None' if not step.note_id else next(n for n in self.notes if n.note_id == step.note_id).content}]: ").strip()
+                        new_note = self.get_input(f"Note [{'None' if not step.note_id else next(n for n in self.notes if n.note_id == step.note_id).content}]:")
                         if new_note:
                             if step.note_id:
                                 # Update existing note
@@ -1239,11 +1487,11 @@ Format the response in clear sections with appropriate headers.
                 # Validation Rules
                 if validation_suggestion:
                     print(f"\nAI suggests validation rules: '{validation_suggestion}'")
-                    use_suggestion = input("Use this suggestion? (y/n): ").lower() == 'y'
+                    use_suggestion = self.get_input("Use this suggestion? (y/n)").lower() == 'y'
                     if use_suggestion:
                         step.validation_rules = validation_suggestion
                     else:
-                        new_validation = input(f"Validation Rules [{step.validation_rules or 'None'}]: ").strip()
+                        new_validation = self.get_input(f"Validation Rules [{step.validation_rules or 'None'}]:")
                         if new_validation:
                             step.validation_rules = new_validation
                         elif new_validation == '':
@@ -1252,34 +1500,34 @@ Format the response in clear sections with appropriate headers.
                 # Error Codes
                 if error_suggestion:
                     print(f"\nAI suggests error codes: '{error_suggestion}'")
-                    use_suggestion = input("Use this suggestion? (y/n): ").lower() == 'y'
+                    use_suggestion = self.get_input("Use this suggestion? (y/n)").lower() == 'y'
                     if use_suggestion:
                         step.error_codes = error_suggestion
                     else:
-                        new_errors = input(f"Error Codes [{step.error_codes or 'None'}]: ").strip()
+                        new_errors = self.get_input(f"Error Codes [{step.error_codes or 'None'}]:")
                         if new_errors:
                             step.error_codes = new_errors
                         elif new_errors == '':
                             step.error_codes = None
             else:
                 # Manual editing without AI suggestions
-                new_desc = input(f"Description [{step.description}]: ").strip()
+                new_desc = self.get_input(f"Description [{step.description}]:")
                 if new_desc:
                     step.description = new_desc
                 
-                new_decision = input(f"Decision [{step.decision}]: ").strip()
+                new_decision = self.get_input(f"Decision [{step.decision}]:")
                 if new_decision:
                     step.decision = new_decision
                 
-                new_success = input(f"Success Outcome [{step.success_outcome}]: ").strip()
+                new_success = self.get_input(f"Success Outcome [{step.success_outcome}]:")
                 if new_success:
                     step.success_outcome = new_success
                 
-                new_failure = input(f"Failure Outcome [{step.failure_outcome}]: ").strip()
+                new_failure = self.get_input(f"Failure Outcome [{step.failure_outcome}]:")
                 if new_failure:
                     step.failure_outcome = new_failure
                 
-                new_note = input(f"Note [{'None' if not step.note_id else next(n for n in self.notes if n.note_id == step.note_id).content}]: ").strip()
+                new_note = self.get_input(f"Note [{'None' if not step.note_id else next(n for n in self.notes if n.note_id == step.note_id).content}]:")
                 if new_note:
                     if step.note_id:
                         # Update existing note
@@ -1292,24 +1540,24 @@ Format the response in clear sections with appropriate headers.
                         step.note_id = note_id
                         self.current_note_id += 1
                 
-                new_validation = input(f"Validation Rules [{step.validation_rules or 'None'}]: ").strip()
+                new_validation = self.get_input(f"Validation Rules [{step.validation_rules or 'None'}]:")
                 if new_validation:
                     step.validation_rules = new_validation
                 elif new_validation == '':
                     step.validation_rules = None
                 
-                new_errors = input(f"Error Codes [{step.error_codes or 'None'}]: ").strip()
+                new_errors = self.get_input(f"Error Codes [{step.error_codes or 'None'}]:")
                 if new_errors:
                     step.error_codes = new_errors
                 elif new_errors == '':
                     step.error_codes = None
             
             # Next steps
-            new_next_success = input(f"Next Step (Success) [{step.next_step_success}]: ").strip()
+            new_next_success = self.get_input(f"Next Step (Success) [{step.next_step_success}]:")
             if new_next_success:
                 step.next_step_success = new_next_success
             
-            new_next_failure = input(f"Next Step (Failure) [{step.next_step_failure}]: ").strip()
+            new_next_failure = self.get_input(f"Next Step (Failure) [{step.next_step_failure}]:")
             if new_next_failure:
                 step.next_step_failure = new_next_failure
             
@@ -1344,18 +1592,21 @@ Format the response in clear sections with appropriate headers.
             context += f"Failure Outcome: {failure_outcome}\n"
             context += f"Path Type: {'Success' if is_success_path else 'Failure'}\n"
             
-            prompt = f"""Based on the following process context:
-
-{context}
-
-Please suggest a clear, descriptive name for the next step in this process. The step name should:
-1. Start with a verb
-2. Be clear and descriptive (2-5 words)
-3. Follow logically from the {'success' if is_success_path else 'failure'} outcome
-4. Be specific to the process flow
-5. Follow business process naming conventions
-
-Format the response as a single step name, or 'End' if this should be the final step."""
+            # Sanitize context to prevent syntax errors from unescaped single quotes
+            safe_context = sanitize_string(context)
+            
+            # Rewrite the prompt with proper string formatting
+            prompt = (
+                f"Based on the following process context:\n\n"
+                f"{safe_context}\n\n"
+                f"Please suggest a clear, descriptive name for the next step in this process. The step name should:\n"
+                f"1. Start with a verb\n"
+                f"2. Be clear and descriptive (2-5 words)\n"
+                f"3. Follow logically from the {'success' if is_success_path else 'failure'} outcome\n"
+                f"4. Be specific to the process flow\n"
+                f"5. Follow business process naming conventions\n\n"
+                f"Format the response as a single step name, or 'End' if this should be the final step."
+            )
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
@@ -1378,14 +1629,24 @@ Format the response as a single step name, or 'End' if this should be the final 
             return ""
             
         try:
-            context = f"""Process: {self.process_name}
-Step ID: {step_id}
-Description: {description}
-Decision: {decision}
-Success Outcome: {success_outcome}
-Failure Outcome: {failure_outcome}
-
-Please suggest a very concise note (10-20 words) that captures the key point or requirement for this step. The note should be brief and actionable."""
+            # Sanitize strings to prevent syntax errors from unescaped single quotes
+            safe_process_name = sanitize_string(self.process_name)
+            safe_step_id = sanitize_string(step_id)
+            safe_description = sanitize_string(description)
+            safe_decision = sanitize_string(decision)
+            safe_success = sanitize_string(success_outcome)
+            safe_failure = sanitize_string(failure_outcome)
+            
+            # Rewrite the context with proper string formatting
+            context = (
+                f"Process: {safe_process_name}\n"
+                f"Step ID: {safe_step_id}\n"
+                f"Description: {safe_description}\n"
+                f"Decision: {safe_decision}\n"
+                f"Success Outcome: {safe_success}\n"
+                f"Failure Outcome: {safe_failure}\n\n"
+                f"Please suggest a very concise note (10-20 words) that captures the key point or requirement for this step. The note should be brief and actionable."
+            )
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
@@ -1407,86 +1668,60 @@ Please suggest a very concise note (10-20 words) that captures the key point or 
             print(f"Error generating note suggestion: {str(e)}")
             return ""
 
+            
     def generate_validation_rules(self, step_id: str, description: str, decision: str, 
                                 success_outcome: str, failure_outcome: str) -> str:
         """Generate suggested validation rules for a step using OpenAI."""
         if not self.openai_client:
             return ""
-            
+        
         try:
-            context = f"""Process: {self.process_name}
-Step ID: {step_id}
-Description: {description}
-Decision: {decision}
-Success Outcome: {success_outcome}
-Failure Outcome: {failure_outcome}
-
-Please suggest 2-3 very concise validation rules (10-20 words each) for this step. Each rule should:
-1. Be specific and actionable
-2. Focus on one key validation point
-3. Be brief and clear
-4. Be easy to implement
-
-Format the response as a bulleted list of very short validation rules."""
-
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a process validation expert. Provide very concise, specific validation rules."},
-                    {"role": "user", "content": context}
-                ],
-                temperature=0.7,
-                max_tokens=100
+            # Build context for the prompt
+            context = (
+                f"Process: {self.process_name}\n"
+                f"Step ID: {step_id}\n"
+                f"Description: {description}\n"
+                f"Decision: {decision}\n"
+                f"Success Outcome: {success_outcome}\n"
+                f"Failure Outcome: {failure_outcome}\n\n"
+                "Please suggest validation rules for this step that:\n"
+                "1. Ensure data quality and completeness\n"
+                "2. Prevent common errors\n"
+                "3. Are specific and actionable\n"
+                "4. Follow best practices\n"
+                "5. Help maintain process integrity\n\n"
+                "Format the response as a bulleted list with brief, clear rules."
             )
-            
-            rules = response.choices[0].message.content.strip()
-            # Ensure each rule is within 10-20 words
-            formatted_rules = []
-            for rule in rules.split('\n'):
-                if rule.strip().startswith('-') or rule.strip().startswith('*'):
-                    words = rule.split()
-                    if len(words) > 20:
-                        rule = ' '.join(words[:20])
-                    formatted_rules.append(rule)
-            return '\n'.join(formatted_rules)
-        except Exception as e:
-            print(f"Error generating validation rules suggestion: {str(e)}")
-            return ""
-
-    def generate_error_codes(self, step_id: str, description: str, decision: str, 
-                           success_outcome: str, failure_outcome: str) -> str:
-        """Generate suggested error codes for a step using OpenAI."""
-        if not self.openai_client:
-            return ""
-            
-        try:
-            context = f"""Process: {self.process_name}
-Step ID: {step_id}
-Description: {description}
-Decision: {decision}
-Success Outcome: {success_outcome}
-Failure Outcome: {failure_outcome}
-
-Please suggest error codes for this step that:
-1. Are specific to potential failure scenarios
-2. Follow a consistent naming convention
-3. Include both technical and business error codes
-4. Are descriptive and meaningful
-5. Can be used for logging and monitoring
-
-Format the response as a bulleted list of error codes with brief descriptions."""
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
                 messages=[
-                    {"role": "system", "content": "You are a process error handling expert. Provide clear, specific error codes for process steps."},
+                    {"role": "system", "content": "You are a process validation expert. Provide clear, specific validation rules."},
                     {"role": "user", "content": context}
                 ],
                 temperature=0.7,
                 max_tokens=200
             )
             
-            return response.choices[0].message.content.strip()
+            # Format the rules
+            rules = response.choices[0].message.content.strip().split('\n')
+            formatted_rules = []
+            for rule in rules:
+                if not rule.strip():
+                    continue
+                    
+                # Ensure each rule starts with a bullet point
+                if not (rule.strip().startswith('-') or rule.strip().startswith('*')):
+                    rule = f"- {rule.strip()}"
+                
+                # Limit rule length
+                words = rule.split()
+                if len(words) > 20:
+                    rule = ' '.join(words[:20])
+                formatted_rules.append(rule)
+            
+            return '\n'.join(formatted_rules)
         except Exception as e:
-            print(f"Error generating error codes suggestion: {str(e)}")
-            return "" 
+            print(f"Error generating validation rules suggestion: {str(e)}")
+            return ""
+
