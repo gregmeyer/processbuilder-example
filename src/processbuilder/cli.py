@@ -2,13 +2,16 @@
 Command-line interface for the Process Builder.
 """
 import argparse
+import csv
+import os
+import random
 import sys
 import time
-import random
-import os
-import csv
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
+
+import openai
 
 from .builder import ProcessBuilder
 from .config import Config
@@ -21,6 +24,9 @@ def get_step_input(prompt: str) -> str:
         if response:
             return response
         print("Please provide a response.")
+
+# Register the CLI input handler with ProcessBuilder
+ProcessBuilder.set_input_handler(get_step_input)
 
 def get_next_step_input(builder: ProcessBuilder, prompt: str) -> str:
     """Get next step input with list of existing steps."""
@@ -164,7 +170,7 @@ def run_interview(builder: ProcessBuilder) -> None:
         clear_screen()
         print(f"\n=== Process Builder: {builder.process_name} - Add Step ===\n")
         
-        while True:  # Main loop for adding steps
+        while True:
             # Get step title with AI suggestion
             if builder.openai_client:
                 try:
@@ -222,7 +228,6 @@ def run_interview(builder: ProcessBuilder) -> None:
                     description = get_step_input("What happens in this step?")
             else:
                 description = get_step_input("What happens in this step?")
-            
             # Get decision with optional AI suggestion
             if builder.openai_client:
                 try:
@@ -298,7 +303,7 @@ def run_interview(builder: ProcessBuilder) -> None:
             # Get next steps with optional AI suggestions
             if builder.openai_client:
                 try:
-                    # Get success path suggestion with user opt-in
+                    # Success path suggestion with user opt-in
                     want_suggestion = input("Would you like an AI suggestion for the next step on success? (y/n)\n> ").lower()
                     if want_suggestion == 'y':
                         show_loading_animation("Generating next step suggestion", in_menu=True)
@@ -329,7 +334,7 @@ def run_interview(builder: ProcessBuilder) -> None:
                                 break
                             print("Please enter a valid step name or 'End' to finish the process.")
                     
-                    # Get failure path suggestion with user opt-in
+                    # Failure path suggestion with user opt-in
                     want_suggestion = input("Would you like an AI suggestion for the next step on failure? (y/n)\n> ").lower()
                     if want_suggestion == 'y':
                         show_loading_animation("Generating next step suggestion", in_menu=True)
@@ -386,7 +391,6 @@ def run_interview(builder: ProcessBuilder) -> None:
                     if builder.validate_next_step(next_step_failure):
                         break
                     print("Please enter a valid step name or 'End' to finish the process.")
-            
             # Get note with optional AI suggestion
             add_note = input("Would you like to add a note for this step? (y/n)\n> ").lower()
             note_id = None
@@ -426,10 +430,12 @@ def run_interview(builder: ProcessBuilder) -> None:
                     want_suggestion = input("Would you like an AI suggestion for validation rules? (y/n)\n> ").lower()
                     if want_suggestion == 'y':
                         show_loading_animation("Generating validation rules suggestion", in_menu=True)
-                        suggested_rules = builder.generate_validation_rules(step_id, description)
+                        suggested_rules = builder.generate_validation_rules(
+                            step_id, description, decision, success_outcome, failure_outcome
+                        )
                         if suggested_rules:
-                            print(f"AI suggests the following validation rules: '{suggested_rules}'")
-                            use_suggested = input("Would you like to use these rules? (y/n)\n> ").lower()
+                            print(f"AI suggests the following validation rules:\n{suggested_rules}")
+                            use_suggested = input("Would you like to use these validation rules? (y/n)\n> ").lower()
                             if use_suggested == 'y':
                                 validation_rules = suggested_rules
                             else:
@@ -450,25 +456,10 @@ def run_interview(builder: ProcessBuilder) -> None:
                     if not validation_rules:  # If empty, set to None
                         validation_rules = None
             else:
-                # No AI client available, use manual input
                 validation_rules = input("What are the validation rules for this step? (Press Enter to skip)\n> ").strip()
                 if not validation_rules:  # If empty, set to None
                     validation_rules = None
-            
-            # Create the step with all gathered information
-            step = ProcessStep(
-                step_id=step_id,
-                description=description,
-                decision=decision,
-                success_outcome=success_outcome,
-                failure_outcome=failure_outcome,
-                note_id=note_id,
-                next_step_success=next_step_success,
-                next_step_failure=next_step_failure,
-                validation_rules=validation_rules,
-                error_codes=None  # We'll set this later
-            )
-            
+
             # Get error codes with optional AI suggestion
             if builder.openai_client:
                 try:
@@ -504,9 +495,20 @@ def run_interview(builder: ProcessBuilder) -> None:
                 error_codes = input("Any specific error codes? (Press Enter to skip)\n> ").strip()
                 if not error_codes:  # If empty, set to None
                     error_codes = None
-            
-            # Update the error codes in the step
-            step.error_codes = error_codes
+
+            # Create the step
+            step = ProcessStep(
+                step_id=step_id,
+                description=description,
+                decision=decision,
+                success_outcome=success_outcome,
+                failure_outcome=failure_outcome,
+                note_id=note_id,
+                next_step_success=next_step_success,
+                next_step_failure=next_step_failure,
+                validation_rules=validation_rules,
+                error_codes=error_codes
+            )
             
             # Add the step and check for issues
             issues = builder.add_step(step)
@@ -515,41 +517,48 @@ def run_interview(builder: ProcessBuilder) -> None:
                 for issue in issues:
                     print(f"- {issue}")
                 print("\nPlease fix these issues and try again.")
-                continue
+                continue  # Now with correct 12-space indentation
             
             # Ask if user wants to add another step
             continue_process = get_step_input("Add another step? (y/n)\n> ").lower()
             if continue_process != 'y':
                 break
-    except KeyboardInterrupt:
-        clear_screen()
-        print("\nProcess building interrupted. Returning to main menu...")
-        return
+    except Exception as e:
+        print(f"An error occurred during interview: {str(e)}")
 
+    # Debug prints to verify builder state
+    print(f"DEBUG: Builder exists: {builder is not None}")
+    print(f"DEBUG: Builder type: {type(builder)}")
+    print(f"DEBUG: Builder has 'steps' attribute: {hasattr(builder, 'steps')}")
+    if hasattr(builder, 'steps'):
+        print(f"DEBUG: Number of steps in builder: {len(builder.steps)}")
+    
     # Generate outputs (after the try-except block)
-    builder.generate_csv()
-    builder.generate_mermaid_diagram()
-    
-    # Generate and save LLM prompt
-    llm_prompt = builder.generate_llm_prompt()
-    print("\n=== LLM Prompt ===")
-    print(llm_prompt)
-    
-    if builder.output_dir:
-        prompt_file = builder.output_dir / f"{builder.process_name}_prompt.txt"
-        prompt_file.write_text(llm_prompt)
-        print(f"LLM prompt saved to: {prompt_file}")
-    
-    # Generate and save executive summary
-    executive_summary = builder.generate_executive_summary()
-    print("\n=== Executive Summary ===")
-    print(executive_summary)
-    
-    if builder.output_dir:
-        summary_file = builder.output_dir / f"{builder.process_name}_executive_summary.md"
-        summary_file.write_text(executive_summary)
-        print(f"Executive summary saved to: {summary_file}")
+    if hasattr(builder, 'steps') and builder.steps:
+        builder.generate_csv()
+        builder.generate_mermaid_diagram()
 
+        # Generate and save LLM prompt
+        llm_prompt = builder.generate_llm_prompt()
+        print("\n=== LLM Prompt ===")
+        print(llm_prompt)
+
+        if builder.output_dir:
+            prompt_file = builder.output_dir / f"{builder.process_name}_prompt.txt"
+            prompt_file.write_text(llm_prompt)
+            print(f"LLM prompt saved to: {prompt_file}")
+
+        # Generate and save executive summary
+        executive_summary = builder.generate_executive_summary()
+        print("\n=== Executive Summary ===")
+        print(executive_summary)
+
+        if builder.output_dir:
+            summary_file = builder.output_dir / f"{builder.process_name}_executive_summary.md"
+            summary_file.write_text(executive_summary)
+            print(f"Executive summary saved to: {summary_file}")
+    else:
+        print("Cannot generate outputs: Process builder has no steps or is in an invalid state.")
 def load_from_csv(builder: ProcessBuilder, steps_csv_path: Path, notes_csv_path: Optional[Path] = None) -> None:
     
     # Load steps from CSV
@@ -908,8 +917,21 @@ def main() -> None:
     process_name = input("Enter the name of the process: ").strip()
     
     # Initialize builder with configuration
-    config = Config()
+    config = Config(env_path=None)
+    
+    # Create ProcessBuilder with proper initialization - pass required parameters
+    # The ProcessBuilder constructor will handle initializing all required attributes
     builder = ProcessBuilder(process_name, config)
+    
+    # The following attributes are now initialized in the ProcessBuilder constructor:
+    # - process_name
+    # - config
+    # - steps (empty list)
+    # - notes (empty list)
+    # - current_note_id (starting at 1)
+    # - output_dir (initially None)
+    # - timestamp (current date/time)
+    # - openai_client (if API key available)
     
     # Determine if we're loading from CSV
     if args.steps_csv:

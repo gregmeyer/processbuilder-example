@@ -161,3 +161,7 @@ cython_debug/
 Pipfile
 /testing
 *.lock
+examples/.DS_Store
+process_builder.py.backup
+src/.DS_Store
+src/processbuilder/.DS_Store
