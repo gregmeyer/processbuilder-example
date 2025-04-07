@@ -27,6 +27,47 @@ A tool for building structured process definitions through interactive interview
   - View OpenAI API responses and request details
   - Monitor API key validation and warnings
 
+## Project Structure
+
+The ProcessBuilder application is organized in a modular architecture:
+
+```
+src/processbuilder/
+├── __init__.py        # Package exports
+├── builder.py         # Main ProcessBuilder class
+├── models.py          # ProcessStep and ProcessNote models
+├── config.py          # Configuration settings
+└── utils/             # Utility modules
+    ├── __init__.py    # Utility exports
+    ├── ai_generation.py            # AI-related functionality
+    ├── file_operations.py          # File handling utilities
+    ├── input_handlers.py           # User input processing
+    ├── interview_process.py        # Step creation workflow
+    ├── output_generation.py        # Output file generation
+    ├── process_management.py       # Process flow management
+    ├── process_validation.py       # Step validation functions
+    ├── state_management.py         # Process state persistence
+    └── ui_helpers.py               # UI display functions
+```
+
+### Core Components
+
+- **ProcessBuilder**: Orchestrates the process building workflow and delegates to utility functions
+- **ProcessStep**: Represents individual steps in the process with validation logic
+- **ProcessNote**: Represents notes attached to process steps
+- **Config**: Handles configuration settings
+
+### Utility Modules
+
+- **ai_generation**: Handles OpenAI API interactions for generating suggestions
+- **process_validation**: Validates process flow, steps, and connections
+- **output_generation**: Generates CSV, Mermaid diagrams, and other outputs
+- **state_management**: Persists and loads process state
+- **input_handlers**: Manages user input collection and validation
+- **ui_helpers**: Provides console UI functionality
+- **file_operations**: Manages file I/O operations
+- **interview_process**: Implements the interactive step creation workflow
+
 ## Configuration
 
 ### Verbose Mode
@@ -210,6 +251,33 @@ Common error codes include:
 - PROCESS_ERROR
 - TIMEOUT
 - RETRY_EXCEEDED
+
+## Development
+
+To set up the development environment:
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/processbuilder.git
+cd processbuilder
+
+# Create virtual environment (optional)
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+venv\Scripts\activate     # Windows
+
+# Install dependencies
+pip install -e .
+
+# Install development dependencies
+pip install -e ".[dev]"
+```
+
+### Running Tests
+
+```bash
+pytest
+```
 
 ## Dependencies
 - Python 3.8+

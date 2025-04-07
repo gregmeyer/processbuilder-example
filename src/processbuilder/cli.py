@@ -86,11 +86,20 @@ def main() -> None:
                     output_path = os.path.join(output_dir, f"{builder.name}.csv")
                     
                     try:
-                        saved = save_csv_data(builder.to_csv(), output_path)
-                        if saved:
-                            print(f"Process saved to {output_path}")
+                        # Convert the process to CSV format
+                        csv_data = builder.to_csv()
+                        if not csv_data:
+                            print("Warning: No data to save. Process may be empty.")
                         else:
-                            print("Failed to save the process.")
+                            # Save the data
+                            saved = save_csv_data(csv_data, output_path)
+                            if saved:
+                                print(f"Process saved to {output_path}")
+                            else:
+                                print("Failed to save the process.")
+                    except AttributeError as e:
+                        print(f"Error: Unable to save process. {str(e)}")
+                        print("This may be due to a missing method or attribute. Please contact support.")
                     except Exception as e:
                         print(f"Error while saving: {str(e)}")
                 

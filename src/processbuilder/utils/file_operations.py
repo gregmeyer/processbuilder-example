@@ -37,7 +37,7 @@ def save_csv_data(data: List[Dict[str, Any]], filepath: Path) -> bool:
     
     Args:
         data: List of dictionaries with data to save
-        filepath: Path where to save the CSV
+        filepath: Path where to save the CSV (can be a string or Path object)
         
     Returns:
         True if successful, False otherwise
@@ -46,6 +46,9 @@ def save_csv_data(data: List[Dict[str, Any]], filepath: Path) -> bool:
         if not data:
             print("Warning: No data to save")
             return False
+            
+        # Convert to Path object if string
+        filepath = Path(filepath) if isinstance(filepath, str) else filepath
             
         # Ensure directory exists
         filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +61,7 @@ def save_csv_data(data: List[Dict[str, Any]], filepath: Path) -> bool:
             writer.writeheader()
             writer.writerows(data)
         
+        print(f"Successfully saved data to {filepath}")
         return True
     except Exception as e:
         print(f"Error saving CSV: {str(e)}")
