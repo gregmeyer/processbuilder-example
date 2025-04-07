@@ -22,6 +22,42 @@ A tool for building structured process definitions through interactive interview
   - Editing existing steps
   - Adding new steps
   - Managing process flow
+- Debug and verbose mode:
+  - Toggle detailed logging for troubleshooting
+  - View OpenAI API responses and request details
+  - Monitor API key validation and warnings
+
+## Configuration
+
+### Verbose Mode
+
+Process Builder includes a verbose mode for detailed logging and debugging:
+
+```python
+# Enable verbose mode at the class level
+from processbuilder import ProcessBuilder
+ProcessBuilder.set_verbose_mode(True)
+
+# Enable verbose mode for a specific instance
+builder = ProcessBuilder("My Process", verbose=True)
+```
+
+When verbose mode is enabled:
+
+- Debug-level logs are displayed, showing detailed process information
+- OpenAI API request and response details are logged
+- Warning messages are always displayed regardless of verbose mode
+- API key validation is logged and visible in the console
+
+Example debug output with verbose mode enabled:
+
+```
+DEBUG - ProcessBuilder initialized with verbose=True
+WARNING - No OpenAI API key found. AI features will be disabled.
+DEBUG - Warning about missing API key has been logged
+DEBUG - Sending OpenAI prompt for first step suggestion
+DEBUG - Received OpenAI first step suggestion: 'Collect Customer Information'
+```
 
 ## Installation
 
@@ -35,11 +71,14 @@ pip install processbuilder
 
 1. Run the process builder:
    ```bash
+   # Basic usage
    processbuilder
+   
+   # Run with verbose mode enabled
+   processbuilder --verbose
    ```
 
 2. Enter the process name when prompted.
-
 3. For each step, you'll be guided through:
    - Step title (with AI suggestion for first step)
    - Step description (with AI suggestion)
@@ -111,7 +150,11 @@ The process flow is validated after each edit to ensure consistency.
 
 2. Run the process builder with CSV files:
    ```bash
+   # Basic import
    processbuilder --steps-csv path/to/steps.csv --notes-csv path/to/notes.csv
+   
+   # Import with verbose mode enabled
+   processbuilder --steps-csv path/to/steps.csv --notes-csv path/to/notes.csv --verbose
    ```
 
 3. The process will be loaded and you'll enter the interactive menu where you can:
@@ -169,12 +212,12 @@ Common error codes include:
 - RETRY_EXCEEDED
 
 ## Dependencies
-
 - Python 3.8+
 - OpenAI API (for AI suggestions)
 - python-dotenv (for environment variables)
 - pandas (for CSV handling)
 - mermaid-cli (for diagram generation)
+- logging (for verbose mode and debug output)
 
 ## License
 
