@@ -15,6 +15,7 @@ A tool for building structured process definitions through interactive interview
 - Multiple output formats:
   - CSV files for process steps and notes
   - Mermaid diagrams for visual representation
+  - PNG images of process diagrams
   - LLM prompts for documentation
   - Executive summaries
 - Interactive menu system for:
@@ -215,6 +216,7 @@ output/
         ├── process_name_process.csv
         ├── process_name_notes.csv
         ├── process_name_diagram.mmd
+        ├── process_name_diagram.png
         ├── process_name_prompt.txt
         └── process_name_executive_summary.md
 ```
@@ -251,6 +253,21 @@ Common error codes include:
 - PROCESS_ERROR
 - TIMEOUT
 - RETRY_EXCEEDED
+
+### Diagram Generation
+
+The process builder generates two types of diagrams:
+
+1. **Mermaid Diagram (.mmd)**:
+   - Text-based diagram format that can be viewed in any Mermaid-compatible viewer
+   - Can be edited and modified as needed
+   - Includes styling for different node types (process, decision, note, end)
+
+2. **PNG Image (.png)**:
+   - Rendered image of the process diagram
+   - Generated automatically using the Mermaid.INK API
+   - Ready to share and include in documentation
+   - White background for better visibility
 
 ## Development
 
