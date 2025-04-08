@@ -7,24 +7,24 @@ from typing import Optional, Any, List, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..builder import ProcessBuilder
 
-def get_step_input(prompt: str, allow_empty: bool = False) -> str:
-    """Get input from user with validation."""
+def get_step_input(builder: 'ProcessBuilder', prompt: str) -> str:
+    """Get step input with proper formatting."""
     while True:
-        response = input(f"\n{prompt}\n> ").strip()
-        if response or allow_empty:
+        response = input(f"{prompt}: ").strip()
+        if response:
             return response
         print("Please provide a response.")
 
 def get_next_step_input(builder: 'ProcessBuilder', prompt: str) -> str:
     """Get next step input with list of existing steps."""
     if builder.steps:
-        print("\nExisting steps:")
+        print("\nExisting steps you can reference:")
         for i, step in enumerate(builder.steps, 1):
             print(f"{i}. {step.step_id}")
-        print("Or enter 'End' to finish the process")
+        print("\nOr type 'End' to finish this path")
     
     while True:
-        response = input(f"\n{prompt}\n> ").strip()
+        response = input(f"{prompt}: ").strip()
         if not response:
             print("Please provide a response.")
             continue
@@ -44,9 +44,14 @@ def get_next_step_input(builder: 'ProcessBuilder', prompt: str) -> str:
         print("Please enter a new step name or 'End'")
 
 def prompt_for_confirmation(prompt: str) -> bool:
-    """Prompt the user for confirmation (y/n)."""
-    response = input(f"\n{prompt} (y/n)\n> ").lower().strip()
-    return response == 'y'
+    """Prompt for yes/no confirmation."""
+    while True:
+        response = input(f"{prompt} (y/n): ").strip().lower()
+        if response in ('y', 'yes'):
+            return True
+        if response in ('n', 'no'):
+            return False
+        print("Please enter 'y' or 'n'.")
 
 def get_with_ai_suggestion(
     prompt: str,
@@ -94,7 +99,7 @@ def get_with_ai_suggestion(
     
     # If user doesn't want AI suggestion, get manual input
     if required:
-        return get_step_input(prompt)
+        return get_step_input(builder, prompt)
     
     # If not required, allow empty input
     response = input(f"\n{prompt} (Press Enter to skip)\n> ").strip()

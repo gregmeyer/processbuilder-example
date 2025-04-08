@@ -24,6 +24,10 @@ def handle_step_decision(builder: 'ProcessBuilder', step_id: str, description: s
     # First get manual input
     decision = get_step_input("What decision needs to be made?")
     
+    # Ensure the decision ends with a question mark
+    if not decision.endswith("?"):
+        decision = decision + "?"
+    
     # Then offer AI suggestion if available
     if builder.openai_client:
         try:

@@ -9,7 +9,7 @@ This package contains modules for:
 - Interview process
 - AI generation functions
 - Process validation
-- Output generation
+- Output handling
 - State management
 """
 import re
@@ -49,13 +49,16 @@ from .process_validation import (
     validate_notes
 )
 
-# Import output generation functions
-from .output_generation import (
+# Import output handling functions
+from .output_handling import (
+    generate_mermaid_diagram,
+    export_to_json,
+    export_to_csv,
+    generate_mermaid_image,
+    setup_output_directory,
     sanitize_id,
     write_csv,
-    setup_output_directory,
     generate_csv,
-    generate_mermaid_diagram,
     generate_llm_prompt,
     save_outputs
 )
@@ -107,23 +110,26 @@ __all__ = [
     'evaluate_step_design',
     'generate_step_title',
     
-    # Process validation
+    # Validation
     'validate_next_step_id',
     'validate_next_step',
     'find_missing_steps',
     'validate_process_flow',
     'validate_notes',
     
-    # Output generation
+    # Output handling
+    'generate_mermaid_diagram',
+    'export_to_json',
+    'export_to_csv',
+    'generate_mermaid_image',
+    'setup_output_directory',
     'sanitize_id',
     'write_csv',
-    'setup_output_directory',
     'generate_csv',
-    'generate_mermaid_diagram',
     'generate_llm_prompt',
     'save_outputs',
     
     # State management
     'save_state',
-    'load_state',
+    'load_state'
 ]
