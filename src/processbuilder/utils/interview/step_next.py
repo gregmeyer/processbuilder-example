@@ -25,6 +25,15 @@ def handle_next_step_input(
     """
     while True:
         next_step = get_step_input(f"What's the next step if {path_type}? (Enter 'End' if final step)")
+        
+        # Handle 'End' case-insensitively
+        if next_step.lower() == 'end':
+            return 'end'  # Always return lowercase
+            
+        # For non-'End' steps, convert spaces to underscores and ensure alphanumeric
+        next_step = ''.join(c if c.isalnum() else '_' for c in next_step)
+        next_step = next_step.strip('_')
+        
         if builder.validate_next_step(next_step):
             return next_step
         print("Please enter a valid step name or 'End' to finish the process.")

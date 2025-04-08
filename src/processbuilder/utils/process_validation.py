@@ -26,11 +26,11 @@ def validate_next_step_id(steps, next_step_id: str) -> bool:
         True if the next step is valid (either 'End' or an existing step ID),
         False otherwise
     """
-    # "End" is always a valid next step
+    # "End" is always a valid next step, regardless of case
     if next_step_id.lower() == 'end':
         return True
         
-    # Check if the step ID exists in the current steps
+    # For non-'End' steps, check if the step ID exists in the current steps
     if any(step.step_id == next_step_id for step in steps):
         return True
         

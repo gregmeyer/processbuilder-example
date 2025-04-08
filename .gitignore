@@ -165,3 +165,6 @@ examples/.DS_Store
 process_builder.py.backup
 src/.DS_Store
 src/processbuilder/.DS_Store
+*.json
+Pipfile.lock
+Pipfile.lock

@@ -3,7 +3,8 @@ Configuration management for the Process Builder.
 """
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
+from datetime import datetime
 from dotenv import load_dotenv
 
 class Config:
@@ -13,6 +14,7 @@ class Config:
         self.env_path = env_path or Path(os.path.dirname(os.path.dirname(__file__))) / '.env'
         self._load_env()
         self._validate_config()
+        self._input_handler = None
     
     def _load_env(self) -> None:
         """Load environment variables from .env file."""
@@ -39,4 +41,34 @@ class Config:
     @property
     def default_output_dir(self) -> Path:
         """Get the default output directory."""
-        return Path("testing/output") 
+        return Path("testing/output")
+        
+    @property
+    def base_output_dir(self) -> Optional[Path]:
+        """Get the base output directory."""
+        return None
+        
+    @property
+    def timestamp(self) -> str:
+        """Get the current timestamp in ISO format."""
+        return datetime.now().isoformat()
+        
+    @property
+    def input_handler(self) -> Optional[Callable[[str], str]]:
+        """Get the input handler function.
+        
+        Returns:
+            A callable that takes a prompt string and returns user input,
+            or None to use the default input handler.
+        """
+        return self._input_handler
+        
+    @input_handler.setter
+    def input_handler(self, handler: Optional[Callable[[str], str]]) -> None:
+        """Set the input handler function.
+        
+        Args:
+            handler: A callable that takes a prompt string and returns user input,
+                    or None to use the default input handler.
+        """
+        self._input_handler = handler 

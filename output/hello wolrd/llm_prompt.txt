@@ -1,0 +1,7 @@
+Process Description:
+
+Steps:
+1. Hello: Do some stuff
+   Decision: Should I continue?
+   Success: Hooray -> End
+   Failure: Sad face -> ENd

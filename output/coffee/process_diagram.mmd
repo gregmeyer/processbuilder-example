@@ -1,0 +1,12 @@
+graph TD
+    Start([Start])
+    Create some coffee["Create some coffee"]
+    Grind Beans["Grind Beans"]
+    Go to Store["Go to Store"]
+    Start --> Create some coffee
+    Create some coffee --> Grind Beans
+    Create some coffee -.-> Go to Store
+    Grind Beans --> End
+    Grind Beans -.-> End
+    Go to Store --> End
+    Go to Store -.-> end

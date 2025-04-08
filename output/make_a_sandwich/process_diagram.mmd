@@ -1,0 +1,45 @@
+graph TD
+    Start([Start])
+    Gather Ingredients["Gather Ingredients"]
+    Go to Store["Go to Store"]
+    Check Bread Freshness["Check Bread Freshness"]
+    Replace Bread["Replace Bread"]
+    Prepare Base["Prepare Base"]
+    Add Main Ingredients["Add Main Ingredients"]
+    Rearrange Ingredients["Rearrange Ingredients"]
+    Final Assembly["Final Assembly"]
+    Fix Assembly["Fix Assembly"]
+    Cut Sandwich["Cut Sandwich"]
+    Adjust Cut["Adjust Cut"]
+    Serve Sandwich["Serve Sandwich"]
+    Improve Presentation["Improve Presentation"]
+    Start Over["Start Over"]
+    Start --> Gather Ingredients
+    Gather Ingredients --> Check Bread Freshness
+    Gather Ingredients -.-> Go to Store
+    Go to Store --> Check Bread Freshness
+    Go to Store -.-> End
+    Check Bread Freshness --> Prepare Base
+    Check Bread Freshness -.-> Replace Bread
+    Replace Bread --> Prepare Base
+    Replace Bread -.-> End
+    Prepare Base --> Add Main Ingredients
+    Prepare Base -.-> Clean Up and Restart
+    Add Main Ingredients --> Final Assembly
+    Add Main Ingredients -.-> Rearrange Ingredients
+    Rearrange Ingredients --> Final Assembly
+    Rearrange Ingredients -.-> Start Over
+    Final Assembly --> Cut Sandwich
+    Final Assembly -.-> Fix Assembly
+    Fix Assembly --> Cut Sandwich
+    Fix Assembly -.-> Start Over
+    Cut Sandwich --> Serve Sandwich
+    Cut Sandwich -.-> Adjust Cut
+    Adjust Cut --> Serve Sandwich
+    Adjust Cut -.-> Serve Sandwich Uncut
+    Serve Sandwich --> End
+    Serve Sandwich -.-> Improve Presentation
+    Improve Presentation --> End
+    Improve Presentation -.-> End
+    Start Over --> Gather Ingredients
+    Start Over -.-> End

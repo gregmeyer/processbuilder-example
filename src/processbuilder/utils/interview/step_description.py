@@ -21,7 +21,11 @@ def handle_step_description(builder: 'ProcessBuilder', step_id: str) -> str:
         The step description
     """
     # First get manual input
-    description = get_step_input("What happens in this step?")
+    while True:
+        description = get_step_input("What happens in this step?")
+        if len(description) >= 10:
+            break
+        print("Description must be at least 10 characters long. Please provide more details.")
     
     # Then offer AI suggestion if available
     if builder.openai_client:
